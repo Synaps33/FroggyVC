@@ -10,6 +10,9 @@ final class Car {
     int damBits, lostBits;            // part uses its damaged mesh / part fell off
     int wheelRot;                     // wheel spin angle
     int aiTimer, turnDir;
+    int vx, vz, vy;                   // velocity mm/s (vy: 1/64 m/s)
+    int yawVel, pitch, roll, slopePitch;
+    boolean slide;
     boolean braking, wrecked;
     Ped driver;
     static final int[] COLORS = { 0xC8302C, 0x2C5FC8, 0xF0D840, 0x2CA05A, 0xE8E8E8, 0x2E2E34, 0xFF8FD0, 0x40C0D0, 0xE87A20, 0x8A2BE2 };

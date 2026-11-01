@@ -1,77 +1,67 @@
 # GTA Vice City – J2ME port (Nokia E72)
 
-Open-world Vice City for MIDP 2.0 / CLDC 1.1. It uses its own software 3D renderer (no M3G) and draws at the phone's screen size (320x240 on the E72).
+Open-world Vice City for MIDP 2.0 / CLDC 1.1, using its own software 3D renderer (no M3G).
 
 ## Getting the JAR (built on GitHub)
-Push to `main` or `master`. The **Build JAR** workflow (`.github/workflows/build.yml`) then does the following on GitHub's machines:
-1. compiles `src/`
-2. preverifies the classes for CLDC (adds StackMap data and checks that only CLDC/MIDP APIs are used)
-3. packages `GTA_VC_J2ME.jar` and `GTA_VC_J2ME.jad`
-4. publishes them as a GitHub Release named `build-N`; each run is also kept as a workflow artifact.
+Push to `main` or `master`. The **Build JAR** workflow compiles, preverifies and packages the game, then publishes a Release with two builds:
 
-Copy the `.jar` to the E72 and open it. The `.jad` is optional.
+| File | Content | Size |
+|---|---|---|
+| `GTA_VC_J2ME.jar` | the whole map | about 36 MB |
+| `GTA_VC_J2ME_lite.jar` | Ocean Beach + Washington Beach only; the rest of the map is open sea | about 15–17 MB |
 
-To re-run the asset converters (map, cars, sprites, fonts) on GitHub, use **Actions → Build JAR → Run workflow** and tick *rebuild assets*.
-If `assets/fonts/hud.ttf` (or `hud.otf`) exists, the menu/HUD font is always regenerated from it.
+Try the lite JAR first on the E72. The full one is big for an S60 phone.
+To make a different region, change `MAP_REGION=i0,j0,i1,j1` in `.github/workflows/build.yml`. Those are tile indices: tile = 100 m, x index = (GTA x + 1900) / 100, y index = (GTA y + 2100) / 100.
 
 ## Controls
-| Key | On foot | In a vehicle |
+| Key | On foot | Vehicle |
 |---|---|---|
-| D-pad | walk / turn | accelerate, brake/reverse, steer |
-| Fire / 5 | 3-hit combo (jab, punch, heavy punch) | accelerate |
-| 2 / 8 | look up / down | look up / down |
-| 4 / 6 | look around (orbit camera) | look around |
-| 0 | toggle **run / walk** | handbrake |
+| D-pad | walk / turn | throttle, brake/reverse, steer |
+| Fire / 5 | punch combo / bat swing / **hold to shoot** (pistol locks on to the nearest person) | throttle |
+| 2 / 8, 4 / 6 | camera tilt / orbit | camera |
+| 0 | toggle **run / walk** | handbrake (powerslide) |
 | 1 (hold) | sprint | – |
+| 3 | switch weapon (fists / bat / pistol) | – |
 | * | enter / exit / carjack | exit |
-| # or soft keys | pause menu | pause menu |
+| # / soft keys | pause | pause |
 
-On the E72's QWERTY keyboard the number keys need **Fn** (or numeric lock). The number keys are now checked before the D-pad mapping. Before this, Nokia reported 2/4/6/8 as UP/LEFT/RIGHT/DOWN, so those keys walked Tommy instead of moving the camera.
+On the E72 QWERTY keyboard, use **Fn** (or numeric lock) for the number keys.
 
-## What's in this version
-* **Map**: the Ocean Beach lighthouse piece (`assets/map/gtavc_beacpart.obj`). Tommy spawns next to `od_oceanrdN1_dy_DFF`. The open, unfinished edge of the piece is an invisible wall. Open sea kills you, because Tommy can't swim.
-* **Cars**: Admiral, Oceanic, Taxi, PCJ-600 and Police (the police car is used for chases).
-  * Every panel has an ok version and a damaged version, taken from the game's `_ok` / `_dam` parts. Bumpers, bonnet, boot and doors fall off after heavy hits, and a car is wrecked at 0 HP.
-  * The geometry is the same as in `cars.obj`, but that file's `.mtl` lost its texture links. So the cars are converted from the matching DFF/TXD out of `gta3.img`, and the wheels come from `cars.obj` with textures from `wheels.txd`.
-* **Wanted level**:
-  * Hitting or killing someone while a cop is within ~30 m gives 1 star.
-  * With no cop around, the 3rd–5th kill (the exact number is random) gives 1 star.
-  * Attacking or killing a cop, ramming a police car or stealing one also raises it.
-  * At 1 star cops try to **arrest** you (stay next to one for about 2 s and you're BUSTED). They only swing at you if you fight.
-  * At 2 or more stars they punch, with cooldowns, and a police car comes after you.
-  * Stars drop when no cop is near you for about 22 s.
-* **Sky**:
-  * Colours come from timecyc.
-  * Clouds drift, with sunset highlights from `cloudhilit`.
-  * The sun has a corona, a streak and a 6-element lens flare that is hidden when the sun is behind geometry.
-  * At night there are a moon and twinkling stars, and the lighthouse has a spinning additive beam plus a glow.
-* **Blood**: a pool from your blood texture spreads under every dead ped.
-* **Intro**: "A Port made by AidenCantCode" is shown, then the assets load, then the opening movie plays (`res/intro.3gp`: 320x180 MPEG-4 Simple Profile with AAC, played through MMAPI) right before the menu. Any key skips both the message and the movie.
-* **Tips** use a regular-weight font (`font_tip.png`, Noto Sans). The menu and HUD use `font.png`.
+## What's in it
+* **Full map**:
+  * The 1.5 M-triangle Blender export is cut into 1,216 tiles of 100 m. They stream in on a background thread with a near and a far version of each tile, and textures load on demand into a 512-slot cache.
+  * Ground uses a 2-layer height grid, so you can walk under bridges and stay on top of overpasses.
+  * Walls/steps, lamps, palms and poles are solid.
+  * There is generated sea using `waterclear256`. Tommy still can't swim.
+* **Spawn**: in the alley beside `wshbuildws09` (Ken Rosenberg's office), with a pistol and a bat lying in the alley.
+* **Peds**: 102 Vice City peds converted from `gta3.img`, including Tommy (`player.dff`), cops, gangs and street peds.
+  * 12 models are loaded at a time and swapped every ~40 s, with about 22 peds on screen.
+  * Peds follow the pavement, sometimes cross, flee from cars and gunfire. Gang members and some others fight back.
+* **Vehicles**: 80 cars and bikes from `gta3.img` (every land vehicle except planes, boats, RC and the tank).
+  * 10 models are loaded at a time and swapped, with up to 8 in traffic.
+  * Panel damage (ok / damaged / falls off) and an explosion when wrecked.
+* **Car physics**:
+  * Velocity is now separate from the heading: grip pulls sideways speed down, the handbrake breaks rear grip, and yaw follows the steering with grip-limited response.
+  * Slopes add gravity, cars have mass in collisions, and the body pitches and rolls.
+  * The chase camera follows the direction of travel.
+  * Handling classes: car / sports / heavy / bike / slow.
+* **Cops**:
+  * 1 star: they try to arrest you, and only hit back if you fight.
+  * 2+ stars: they shoot, and police cars chase you (with siren).
+  * Stars fade after about 22 s out of sight.
+* **Sounds**: 15 effects pulled from `sfx.raw` (punch, colt45, bat, crash, doors, horn, pickup, explosion, splash, siren, engine idle/rev loops).
+* **Screens**: real loading screens and title splash from the TXDs. The menu/HUD use Pricedown (`assets/fonts/hud.otf`) and tips use regular Noto Sans. The menu now fades in after the intro movie instead of cutting.
 
-## Repository layout
+## Rebuilding assets (local, not in CI)
+The sources are too large for GitHub, so keep them outside the repo:
 ```
-src/                      game (CLDC 1.1 / MIDP 2.0 Java)
-res/                      everything packed into the JAR (generated by tools/, committed so CI only compiles)
-assets/map                map OBJ/MTL + textures (source)
-assets/cars               car DFF/TXD from gta3.img, cars.obj (wheels), wheels.txd textures
-assets/particles          particle.txd export (sky, flares, blood)
-assets/video              intro source video
-assets/fonts              NotoSans-Regular (tips); put hud.ttf here for the menu/HUD font
-tools/build.sh            javac -> class v46 -> CLDC preverify (tools/Preverify.java)
-tools/package.py          JAR/JAD
-tools/map_export.py       OBJ -> res/map.bin (chunks, height/surface/solid grids, radar, spawn, lighthouse lamp)
-tools/car_export.py       DFF/TXD -> res/car_*.bin (+ wheel.bin)
-tools/fx_export.py        sky/flare sprites, blood decal, fonts
-tools/img_extract.py      pull more DFF/TXD out of gta3.img
-tools/test/Shots.java     headless test run with screenshots (tools/test.sh Shots)
+python3 tools/map_full_export.py "path/GTA Vice City Map Full.obj"   # needs textures/ beside the .obj, ~10 min, ~1.5 GB RAM
+python3 tools/ped_export.py   path/gta3.img
+CARS=dir_with_dff_txd python3 tools/car_export.py admiral ...       # tools/img_extract.py pulls them out of gta3.img
+python3 tools/weapon_export.py path/gta3.img
+python3 tools/sound_export.py  path/Audio                             # sfx.RAW + sfx.SDT
+python3 tools/screens_export.py path/txd                              # LOADSC*.TXD, SPLASH1.TXD
+python3 tools/fx_export.py                                            # sprites + fonts
 ```
-`gta3.img` is **not** in the repo: it is 327 MB and GitHub refuses files over 100 MB. Keep it locally and extract what you need:
-`python3 tools/img_extract.py gta3.img assets/cars sentinel.dff sentinel.txd`
-
-Swapping in the full map later: export it the same way (Blender OBJ + MTL + textures folder) and run
-`python3 tools/map_export.py path/to/map.obj`. The spawn object name is `SPAWN_OBJ` at the top of the script.
-
-## Building locally
-JDK 17 and Python 3 with numpy and pillow:
-`bash tools/build.sh && python3 tools/package.py dist`
+Building locally: JDK 17 + Python 3 → `bash tools/build.sh && python3 tools/package.py dist`.
+`tools/test.sh Shots` runs a headless session with screenshots.

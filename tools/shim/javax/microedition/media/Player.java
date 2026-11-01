@@ -10,4 +10,7 @@ public interface Player extends Controllable {
     int getState();
     void addPlayerListener(PlayerListener l);
     void removePlayerListener(PlayerListener l);
+    void setLoopCount(int count);
+    long setMediaTime(long now) throws MediaException;
+    long getMediaTime();
 }

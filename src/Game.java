@@ -5,7 +5,7 @@ public final class Game extends Canvas implements Runnable {
     static final int S_LOAD = 0, S_MENU = 1, S_OPT = 2, S_PLAY = 3, S_PAUSE = 4, S_CTRL = 5, S_MAP = 6, S_STATS = 7, S_SPLASH = 8, S_VIDEO = 9;
     // logical key actions
     static final int A_UP = 1, A_DOWN = 2, A_LEFT = 4, A_RIGHT = 8, A_FIRE = 16, A_ENTER = 32, A_CAML = 64, A_CAMR = 128,
-            A_CAMU = 256, A_CAMD = 512, A_SPRINT = 1024, A_HAND = 2048, A_PAUSE = 4096;
+            A_CAMU = 256, A_CAMD = 512, A_SPRINT = 1024, A_HAND = 2048, A_PAUSE = 4096, A_WEAP = 8192;
 
     final GtaMidlet midlet;
     int W, H, u = 1, rs = 1;
@@ -13,7 +13,7 @@ public final class Game extends Canvas implements Runnable {
     R3D r = new R3D();
     World world;
     int state = S_SPLASH, prevState;
-    int splashMs;
+    int splashMs, fadeMs = 9999;
     Intro intro;
     volatile boolean running, paused, needResize = true;
     Thread thread;
@@ -40,7 +40,7 @@ public final class Game extends Canvas implements Runnable {
         midlet = m;
         setFullScreenMode(true);
         Fx.init();
-        total = Ui.UI_STEPS + Assets.T_COUNT + Assets.initExtra() + 11;
+        total = Ui.UI_STEPS + 7;
         W = getWidth(); H = getHeight();
     }
 
@@ -51,12 +51,12 @@ public final class Game extends Canvas implements Runnable {
         thread = new Thread(this);
         thread.start();
     }
-    void stop() { running = false; }
+    void stop() { running = false; if (world != null) world.alive = false; Snd.stopAll(); }
 
     protected void showNotify() { paused = false; }
     protected void hideNotify() {
         paused = true;
-        if (state == S_PLAY) { prevState = S_PLAY; state = S_PAUSE; sel = 0; }
+        if (state == S_PLAY) { prevState = S_PLAY; state = S_PAUSE; sel = 0; Snd.stopAll(); }
     }
     protected void sizeChanged(int w, int h) { W = w; H = h; needResize = true; }
 
@@ -86,7 +86,7 @@ public final class Game extends Canvas implements Runnable {
             case KEY_NUM1: case 'q': case 'Q': return A_SPRINT;
             case KEY_NUM0: case ' ': case 'b': case 'B': return A_HAND;
             case KEY_POUND: case 'p': case 'P': case 27: return A_PAUSE;
-            case KEY_NUM3: return A_SPRINT;
+            case KEY_NUM3: case 'r': case 'R': return A_WEAP;
             case KEY_NUM7: return A_HAND;
             case KEY_NUM9: return A_ENTER;
             case 'w': case 'W': return A_UP;
@@ -159,6 +159,11 @@ public final class Game extends Canvas implements Runnable {
             case S_PLAY: doPlay(dt, e); break;
             default: break;
         }
+        if (state == S_MENU && fadeMs < 900) {          // fade the menu in after the movie instead of a hard cut
+            fadeMs += dt;
+            int f = fadeMs < 150 ? 0 : (fadeMs - 150) * 256 / 750;
+            if (f < 256) for (int q = 0; q < scr.length; q++) { int c = scr[q]; scr[q] = ((((c & 0xFF00FF) * f) >>> 8) & 0xFF00FF) | ((((c & 0xFF00) * f) >>> 8) & 0xFF00); }
+        }
         if (rs > 1 && state == S_PLAY) upscale();
         if (state == S_PLAY) overlay();
         if (oTrails && state == S_PLAY) doTrails();
@@ -192,7 +197,7 @@ public final class Game extends Canvas implements Runnable {
         if (intro.done || anyKey != videoKeys) {
             intro.stop();
             intro = null;
-            state = S_MENU; sel = 0; edges = 0; down = 0;
+            state = S_MENU; sel = 0; edges = 0; down = 0; fadeMs = 0;
             System.gc();
         }
     }
@@ -235,16 +240,11 @@ public final class Game extends Canvas implements Runnable {
     void loadOne(int i) throws java.io.IOException {
         if (i < Ui.UI_STEPS) { Ui.loadStep(i); if (i == Ui.UI_STEPS - 1) uiReady = true; return; }
         i -= Ui.UI_STEPS;
-        if (i < Assets.T_COUNT) { Assets.loadTexture(r, i); return; }
-        i -= Assets.T_COUNT;
-        if (i < Assets.extra.length) { Assets.loadExtra(r, i); return; }
-        i -= Assets.extra.length;
-        if (i == 0) { world = new World(r); world.pm0 = PedModel.load("/ped0.bin");
-            for (int k = 0; k < 5; k++) { world.npc[k] = PedModel.load("/npc_" + World.NPC_NAMES[k] + ".bin"); world.npcLo[k] = PedModel.load("/npc_" + World.NPC_NAMES[k] + "_lo.bin"); } }
-        else if (i == 1) { AnimData.load(); world.loadTimecyc(); Sky.load(); }
-        else if (i >= 2 && i < 2 + World.NCAR_TYPES) world.carModels[i - 2] = CarModel.load(World.CAR_NAMES[i - 2]);
-        else if (i == 7) world.loadMap();
-        else if (i == 8) { world.reset(); applyOptions(); }
+        if (i == 0) { Assets.r = r; world = new World(r); world.loadIndex(); }
+        else if (i == 1) { AnimData.load(); world.loadTimecyc(); Sky.load(); Snd.init(); }
+        else if (i == 2) world.loadPools();
+        else if (i == 3) world.preload(world.spX, world.spZ);
+        else if (i == 4) { world.reset(); applyOptions(); world.startLoader(); }
         else System.gc();
     }
 
@@ -278,7 +278,7 @@ public final class Game extends Canvas implements Runnable {
             else { running = false; }
         }
         drawMenu("grand theft auto", MAIN);
-        Ui.textC(scr, W, H, W / 2, H - 14 * u, "vice city  j2me demake", 0xB0B0C0, 1);
+        Ui.textC(scr, W, H, W / 2, H - 14 * u, "a port made by aidencantcode", 0xB0B0C0, 1);
     }
 
     void doPause(int e) {
@@ -353,7 +353,7 @@ public final class Game extends Canvas implements Runnable {
     void applyOptions() {
         if (world == null) return;
         world.brightness = oBright * 14 / 15;
-        world.drawDist = 50 + oDraw * 7;
+        world.drawDist = 60 + oDraw * 12;
     }
 
     void draw2() {
@@ -363,7 +363,7 @@ public final class Game extends Canvas implements Runnable {
         if (state == S_CTRL) {
             Ui.menuTitle(scr, W, H, u, "controls");
             String[] t = { "d-pad: walk / turn / steer", "fire / 5: punch (3 hit combo) / gas", "*: enter / exit / steal car", "2 8: look up / down   4 6: look around",
-                    "0: toggle run / walk  (in car: handbrake)", "1 (hold): sprint", "down: brake / reverse", "soft key or #: pause menu" };
+                    "0: toggle run / walk  (in car: handbrake)", "1 (hold): sprint   3: switch weapon", "down: brake / reverse", "soft key or #: pause menu" };
             for (int i = 0; i < t.length; i++) Ui.text(scr, W, H, x, y + i * st, t[i], Ui.PINK, u);
         } else if (state == S_STATS) {
             Ui.menuTitle(scr, W, H, u, "stats");
@@ -406,7 +406,7 @@ public final class Game extends Canvas implements Runnable {
         if ((d & A_SPRINT) != 0) k |= World.K_SPRINT;
         if ((d & A_HAND) != 0) k |= World.K_HAND;
         titleMs += dt;
-        world.update(dt, k, (e & A_FIRE) != 0, (e & A_ENTER) != 0, (e & A_HAND) != 0 && world.inCar == null);
+        world.update(dt, k, (e & A_FIRE) != 0, (e & A_ENTER) != 0, (e & A_HAND) != 0 && world.inCar == null, (e & A_WEAP) != 0);
         // contextual help like the original
         World w = world;
         if (w.inCar == null && w.helpT <= 0 && w.helpShown == 0) {
@@ -442,7 +442,7 @@ public final class Game extends Canvas implements Runnable {
         if (w.helpT > 0 && oSubs && w.help != null) Ui.helpBox(scr, W, H, u, w.help);
         if (titleMs < 4200) {
             int a = titleMs < 600 ? titleMs * 255 / 600 : (titleMs > 3400 ? (4200 - titleMs) * 255 / 800 : 255);
-            String z = "Ocean Beach";
+            String z = "Washington Beach";
             int tw = Ui.textW(z, u * 2);
             for (int i = 0; i < z.length(); i++) { }
             if (a > 120) Ui.text(scr, W, H, W - 8 * u - tw, H - 28 * u, z, 0x28D890, u * 2);

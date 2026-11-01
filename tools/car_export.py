@@ -24,7 +24,8 @@ import mesh_tools
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 RES = os.path.join(ROOT, 'res')
-SRC = os.path.join(ROOT, 'assets', 'cars')
+SRC = os.environ.get('CARS', os.path.join(ROOT, 'assets', 'cars'))
+WHEELSRC = os.path.join(ROOT, 'assets', 'cars')
 WHEEL_R = 0.34
 PRIMARY, SECONDARY = (60, 255, 0), (255, 0, 175)
 SKIP_TEX = {'white64a', 'white128a', 'black64'}
@@ -146,16 +147,17 @@ def convert(name):
         var = 1 if fname.endswith('_dam') else 0
         fi = fr[fname]; R, t = W[fi]
         P = r['geoms'][gi]['verts'].astype(float) @ R + t
-        ratio = 0.40 if base == 'chassis' else (0.55 if not bike else 0.45)
+        ratio = 0.30 if base == 'chassis' else 0.45
         m = build_mesh(P, r['geoms'][gi], ground, tid, txd, ratio, fname)
         if m is None: continue
         piv = W[r['frames'][fi]['parent']][1] if r['frames'][fi]['parent'] >= 0 else t
         e = parts.setdefault(base, {'pivot': piv, 'var': [None, None]})
         e['var'][var] = m
-    fi = fr['chassis_vlo']; R, t = W[fi]
-    P = r['geoms'][atom['chassis_vlo']]['verts'].astype(float) @ R + t
-    lod1 = build_mesh(P, r['geoms'][atom['chassis_vlo']], ground, tid, txd, 1.0, 'chassis_vlo')
-    seat = W[fr['ped_frontseat']][1]
+    vlo = 'chassis_vlo' if 'chassis_vlo' in atom else 'chassis_hi'
+    fi = fr[vlo]; R, t = W[fi]
+    P = r['geoms'][atom[vlo]]['verts'].astype(float) @ R + t
+    lod1 = build_mesh(P, r['geoms'][atom[vlo]], ground, tid, txd, 1.0 if vlo == 'chassis_vlo' else 0.15, vlo)
+    seat = W[fr['ped_frontseat']][1] if 'ped_frontseat' in fr else np.array([0.45, 0.0, 0.0]) + np.array([0, 0, ground + 0.6])
     allv = np.array([v[:3] for p in parts.values() for m in p['var'] if m for v in m[0]])
     dims = (int(allv[:, 0].max() - allv[:, 0].min()), int(allv[:, 1].max()), int(allv[:, 2].max() - allv[:, 2].min()))
     out = bytearray(b'CAR2') + struct.pack('>B', len(texnames))
@@ -187,7 +189,7 @@ def convert(name):
 def wheel():
     """generic wheel from cars.obj (wheel_saloon_l1) -> res/wheel.bin (single mesh, centred, radius-normalised)"""
     V, VT, cur, mat, F = [], [], None, None, []
-    for l in open(os.path.join(SRC, 'cars.obj')):
+    for l in open(os.path.join(WHEELSRC, 'cars.obj')):
         if l.startswith('v '): V.append([float(x) for x in l.split()[1:4]])
         elif l.startswith('vt '): VT.append([float(x) for x in l.split()[1:3]])
         elif l.startswith('o '): cur = l[2:].strip()
@@ -216,7 +218,7 @@ def wheel():
     out += mesh_bytes((verts, tris))
     open(os.path.join(RES, 'wheel.bin'), 'wb').write(out)
     for n, f in (('wheel_saloon64', 'wheels.txd_wheel_saloon64_0.png'), ('tyre64a', 'wheels.txd_tyre64a_0.png')):
-        Image.open(os.path.join(SRC, 'wheels_tex', f)).convert('RGB').resize((64, 64), Image.LANCZOS).save(os.path.join(RES, 't_%s.png' % n))
+        Image.open(os.path.join(WHEELSRC, 'wheels_tex', f)).convert('RGB').resize((64, 64), Image.LANCZOS).save(os.path.join(RES, 't_%s.png' % n))
     print('wheel: %d tris' % len(tris))
     return names
 
@@ -225,7 +227,12 @@ if __name__ == '__main__':
     os.makedirs(RES, exist_ok=True)
     names = sys.argv[1:] or ['admiral', 'oceanic', 'taxi', 'pcj600', 'police']
     allt = wheel()
+    ok = []
     for n in names:
-        for t in convert(n):
+        try: ts = convert(n)
+        except Exception as e: print('skip', n, e); continue
+        ok.append(n)
+        for t in ts:
             if t not in allt: allt.append(t)
+    open(os.path.join(RES, 'cars.lst'), 'w').write('\n'.join(ok) + '\n')
     open(os.path.join(RES, 'cartex.lst'), 'w').write('\n'.join(allt) + '\n')

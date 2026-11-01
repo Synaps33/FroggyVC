@@ -20,7 +20,7 @@ FONTS = os.path.join(ROOT, 'assets', 'fonts')
 SPRITES = {  # name: (source, size)
     'cloud1': ('cloud1', 64), 'cloud2': ('cloud2', 64), 'cloud3': ('cloud3', 64), 'cloudhilit': ('cloudhilit', 64),
     'corona': ('corona', 64), 'star': ('coronastar', 32), 'moon': ('coronamoon', 32), 'ringa': ('coronaringa', 64),
-    'hex': ('coronahex', 32), 'circle': ('coronacircle', 32), 'reflect': ('coronareflect', 32), 'streek': ('streek', 32),
+    'hex': ('coronahex', 32), 'flash': ('gunflash1', 32), 'circle': ('coronacircle', 32), 'reflect': ('coronareflect', 32), 'streek': ('streek', 32),
 }
 
 
@@ -42,7 +42,7 @@ def blood():
     Image.fromarray(o, 'RGBA').save(os.path.join(RES, 't_blood.png'), optimize=True)
 
 
-def font(path, out, size=13, boost=1.4):
+def font(path, out, size=13, boost=1.4, cut=40):
     S, CW, CH, BASE = 4, 14, 16, 12
     big = ImageFont.truetype(path, size * S)
     atlas = Image.new('RGBA', (CW * 95, CH), (0, 0, 0, 0))
@@ -53,7 +53,7 @@ def font(path, out, size=13, boost=1.4):
         bb = d.textbbox((0, BASE * S), ch, font=big, anchor='ls')
         d.text((-bb[0], BASE * S), ch, font=big, fill=255, anchor='ls')
         a = np.array(g.resize((CW, CH), Image.LANCZOS)).astype(float)
-        a = np.where(a > 40, np.clip(a * boost, 0, 255), 0).astype(np.uint8)
+        a = np.where(a > cut, np.clip(a * boost, 0, 255), 0).astype(np.uint8)
         rgba = np.zeros((CH, CW, 4), np.uint8); rgba[..., :3] = 255; rgba[..., 3] = a
         atlas.paste(Image.fromarray(rgba, 'RGBA'), (i * CW, 0))
     atlas.save(os.path.join(RES, out), optimize=True)
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     sprites(); blood()
     hud = [p for p in glob.glob(os.path.join(FONTS, 'hud.*')) if p.lower().endswith(('.ttf', '.otf'))]
     if hud:
-        font(hud[0], 'font.png'); print('menu/HUD font from', os.path.basename(hud[0]))
+        font(hud[0], 'font.png', 16, 1.25, 12); print('menu/HUD font from', os.path.basename(hud[0]))
     else:
         print('no assets/fonts/hud.ttf - keeping res/font.png')
     font(os.path.join(FONTS, 'NotoSans-Regular.ttf'), 'font_tip.png', 12, 1.15)

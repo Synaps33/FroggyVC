@@ -1,81 +1,112 @@
 import java.io.*;
 
-/** The streamed Vice City map piece: geometry chunks, ground/solid grids, entities, simulation and rendering. */
-final class World {
+/** Streamed Vice City: tiles, ground/solid grids, peds, traffic, cops, weapons, simulation and rendering. */
+final class World implements Runnable {
     R3D r;
+    World(R3D r) { this.r = r; }
 
-    // ------------------------------------------------------------------ map data
-    Mesh[] chunk;
-    int[] chunkX, chunkZ;               // chunk origin, 1/64 m
-    int nchunk;
-    int hx0, hz0, hcell, hw, hh;        // height + surface grid (mm)
-    short[] hgt;                        // 1/64 m, -32768 = open sea
-    byte[] surf;                        // 0 water, 1 sand, 2 grass, 3 pavement, 4 road, 5 rock
-    int sx0, sz0, scell, sw, sh, srow;  // solid grid
-    byte[] solid;
-    int rx0, rz0, rcell, rw, rh;        // radar
+    // ================================================================== map streaming
+    int mox, moz, tileMm, tnx, tnz;
+    byte[] tflag;
+    Tile[] tiles;
+    int rx0, rz0, rcell, rw, rh;
     byte[] rad;
     int spX, spZ, spY, spYaw;
-    int nslot;
-    int[] slotX, slotZ, slotYaw;
     int lampX, lampY, lampZ;
     Mesh beam, blood;
     static final int S_WATER = 0, S_SAND = 1, S_GRASS = 2, S_PAVE = 3, S_ROAD = 4, S_ROCK = 5;
+    static final int RING = 3;
+    private final int[] reqQ = new int[64];
+    private int reqN;
+    private final Tile[] readyQ = new Tile[16];
+    private int readyN;
+    private boolean[] requested;
+    private Thread loader;
+    volatile boolean alive = true;
 
-    World(R3D r) { this.r = r; }
-
-    void loadMap() throws IOException {
-        DataInputStream d = new DataInputStream(new ByteArrayInputStream(Assets.readAll("/map.bin")));
+    void loadIndex() throws IOException {
+        DataInputStream d = new DataInputStream(new ByteArrayInputStream(Assets.readAll("/mapidx.bin")));
         byte[] mg = new byte[4]; d.readFully(mg);
-        int[] texId = CarModel.readTex(d);
-        nchunk = d.readUnsignedShort();
-        chunk = new Mesh[nchunk]; chunkX = new int[nchunk]; chunkZ = new int[nchunk];
-        for (int c = 0; c < nchunk; c++) {
-            chunkX[c] = d.readInt() >> 4; chunkZ[c] = d.readInt() >> 4;
-            int nv = d.readUnsignedShort();
-            Mesh m = new Mesh();
-            m.nv = nv;
-            m.x = new int[nv]; m.y = new int[nv]; m.z = new int[nv]; m.u = new int[nv]; m.v = new int[nv];
-            for (int i = 0; i < nv; i++) { m.x[i] = d.readShort(); m.y[i] = d.readShort(); m.z[i] = d.readShort(); m.u[i] = d.readShort(); m.v[i] = d.readShort(); }
-            int nt = d.readUnsignedShort();
-            m.nt = nt; m.ti = new int[nt * 3]; m.tex = new short[nt]; m.col = new int[nt]; m.flag = new byte[nt];
-            m.nx = new byte[nt]; m.ny = new byte[nt]; m.nz = new byte[nt];
-            for (int i = 0; i < nt; i++) {
-                int a = d.readUnsignedShort(), b = d.readUnsignedShort(), cc = d.readUnsignedShort();
-                m.ti[i * 3] = a; m.ti[i * 3 + 1] = b; m.ti[i * 3 + 2] = cc;
-                int t = d.readUnsignedByte();
-                m.tex[i] = (short) (t == 255 || t >= texId.length ? -1 : texId[t]);
-                m.flag[i] = (byte) d.readUnsignedByte();
-                m.col[i] = (d.readUnsignedByte() << 16) | (d.readUnsignedByte() << 8) | d.readUnsignedByte();
-                CarModel.normal(m, i, a, b, cc);
-            }
-            m.bounds();
-            chunk[c] = m;
-        }
-        hx0 = d.readInt(); hz0 = d.readInt(); hcell = d.readUnsignedShort(); hw = d.readUnsignedShort(); hh = d.readUnsignedShort();
-        hgt = new short[hw * hh];
-        for (int i = 0; i < hgt.length; i++) hgt[i] = d.readShort();
-        surf = new byte[hw * hh]; d.readFully(surf);
-        sx0 = d.readInt(); sz0 = d.readInt(); scell = d.readUnsignedShort(); sw = d.readUnsignedShort(); sh = d.readUnsignedShort();
-        srow = d.readUnsignedShort();
-        solid = new byte[srow * sh]; d.readFully(solid);
+        mox = d.readInt(); moz = d.readInt(); tileMm = d.readUnsignedShort(); tnx = d.readUnsignedShort(); tnz = d.readUnsignedShort();
+        tileMm = 100 * 1024;
+        byte[] bits = new byte[(tnx * tnz + 7) / 8]; d.readFully(bits);
+        tflag = new byte[tnx * tnz];
+        for (int k = 0; k < tnx * tnz; k++) tflag[k] = (byte) ((bits[k >> 3] >> (7 - (k & 7))) & 1);
+        d.readUnsignedShort();
         rx0 = d.readInt(); rz0 = d.readInt(); rcell = d.readUnsignedShort(); rw = d.readUnsignedShort(); rh = d.readUnsignedShort();
         rad = new byte[rw * rh]; d.readFully(rad);
         spX = d.readInt(); spZ = d.readInt(); spY = d.readInt(); spYaw = d.readUnsignedShort();
-        nslot = d.readUnsignedByte();
-        slotX = new int[nslot]; slotZ = new int[nslot]; slotYaw = new int[nslot];
-        for (int i = 0; i < nslot; i++) { slotX[i] = d.readInt(); slotZ[i] = d.readInt(); slotYaw[i] = d.readUnsignedShort(); }
         lampX = d.readInt(); lampY = d.readInt(); lampZ = d.readInt();
         d.close();
+        tiles = new Tile[tnx * tnz];
+        requested = new boolean[tnx * tnz];
         buildFxMeshes();
     }
 
-    /** lighthouse beam (two crossed tapered planes) + the blood decal quad */
+    void preload(int x, int z) {
+        int ci = (x - mox) / tileMm, cj = (z - moz) / tileMm;
+        for (int j = cj - 2; j <= cj + 2; j++) for (int i = ci - 2; i <= ci + 2; i++) {
+            int k = idx(i, j);
+            if (k < 0 || tiles[k] != null || tflag[k] == 0) continue;
+            try { Tile t = Tile.load(i, j, mox, moz, tileMm); t.install(); tiles[k] = t; } catch (Exception e) { tflag[k] = 0; }
+        }
+    }
+    void startLoader() { if (loader == null) { loader = new Thread(this); loader.start(); } }
+    int idx(int i, int j) { return i < 0 || j < 0 || i >= tnx || j >= tnz ? -1 : j * tnx + i; }
+
+    public void run() {
+        while (alive) {
+            int k = -1;
+            synchronized (reqQ) {
+                if (reqN == 0) { try { reqQ.wait(500); } catch (InterruptedException e) { } }
+                if (reqN > 0) { k = reqQ[0]; System.arraycopy(reqQ, 1, reqQ, 0, --reqN); }
+            }
+            if (k < 0) continue;
+            Tile t;
+            try { t = Tile.load(k % tnx, k / tnx, mox, moz, tileMm); } catch (Throwable e) { t = null; }
+            synchronized (readyQ) {
+                if (t == null) { tflag[k] = 0; requested[k] = false; }
+                else if (readyN < readyQ.length) readyQ[readyN++] = t;
+                else requested[k] = false;
+            }
+            try { Thread.sleep(5); } catch (InterruptedException e) { }
+        }
+    }
+
+    /** each frame: install finished tiles, request missing ones nearest first, drop far ones */
+    void streamTiles(int x, int z) {
+        synchronized (readyQ) {
+            for (int n = 0; n < readyN; n++) {
+                Tile t = readyQ[n];
+                int k = idx(t.i, t.j);
+                requested[k] = false;
+                if (tiles[k] == null) { t.install(); tiles[k] = t; }
+                readyQ[n] = null;
+            }
+            readyN = 0;
+        }
+        if (loader == null) return;
+        int ci = (x - mox) / tileMm, cj = (z - moz) / tileMm;
+        for (int ring = 0; ring <= RING; ring++) {
+            for (int j = cj - ring; j <= cj + ring; j++) for (int i = ci - ring; i <= ci + ring; i++) {
+                if (Math.max(Math.abs(i - ci), Math.abs(j - cj)) != ring) continue;
+                int k = idx(i, j);
+                if (k < 0 || tflag[k] == 0 || tiles[k] != null || requested[k]) continue;
+                synchronized (reqQ) { if (reqN < reqQ.length) { reqQ[reqN++] = k; requested[k] = true; reqQ.notify(); } }
+            }
+        }
+        for (int k = 0; k < tiles.length; k++) {
+            Tile t = tiles[k];
+            if (t == null) continue;
+            if (Math.abs(t.i - ci) > RING + 1 || Math.abs(t.j - cj) > RING + 1) { t.unload(); tiles[k] = null; }
+        }
+    }
+
     void buildFxMeshes() {
         int L = 70 * 64, w = 7 * 64;
-        int[] x = { 0, -w, w, 0, 0 }, y = { 0, 0, 0, -w, w }, z = { 0, L, L, L, L };
         beam = new Mesh();
-        beam.nv = 5; beam.x = x; beam.y = y; beam.z = z; beam.u = new int[5]; beam.v = new int[5];
+        beam.nv = 5; beam.x = new int[] { 0, -w, w, 0, 0 }; beam.y = new int[] { 0, 0, 0, -w, w }; beam.z = new int[] { 0, L, L, L, L };
+        beam.u = new int[5]; beam.v = new int[5];
         beam.nt = 2; beam.ti = new int[] { 0, 1, 2, 0, 3, 4 };
         beam.tex = new short[] { -1, -1 }; beam.col = new int[] { 0x2A2618, 0x2A2618 };
         beam.flag = new byte[] { (byte) (Mesh.F_DOUBLE | Mesh.F_EMISSIVE), (byte) (Mesh.F_DOUBLE | Mesh.F_EMISSIVE) };
@@ -86,53 +117,68 @@ final class World {
         blood.nv = 4; blood.x = new int[] { -q, q, q, -q }; blood.y = new int[4]; blood.z = new int[] { -q, -q, q, q };
         blood.u = new int[] { 0, 511, 511, 0 }; blood.v = new int[] { 0, 0, 511, 511 };
         blood.nt = 2; blood.ti = new int[] { 0, 2, 1, 0, 3, 2 };
-        int bt = Assets.idOf("blood");
+        int bt = Assets.acquire("/t_blood.png");
         blood.tex = new short[] { (short) bt, (short) bt }; blood.col = new int[2];
         blood.flag = new byte[] { Mesh.F_DOUBLE, Mesh.F_DOUBLE };
         blood.nx = new byte[2]; blood.ny = new byte[] { 127, 127 }; blood.nz = new byte[2];
         blood.bounds();
     }
 
-    // ------------------------------------------------------------------ grids
-    /** ground height (1/64 m) at mm position, bilinear */
-    int groundH(int xm, int zm) {
-        int fx = (int) (((long) (xm - hx0) << 8) / hcell), fz = (int) (((long) (zm - hz0) << 8) / hcell);
+    // ------------------------------------------------------------------ grids (global cell indices)
+    private Tile tileFor(int gi, int gj, int per) {
+        if (gi < 0 || gj < 0) return null;
+        int k = idx(gi / per, gj / per);
+        return k < 0 ? null : tiles[k];
+    }
+    private int hCell(int gi, int gj, int y) {
+        Tile t = tileFor(gi, gj, Tile.NH);
+        if (t == null || t.top == null) return -640;
+        int k = (gj % Tile.NH) * Tile.NH + (gi % Tile.NH);
+        int a = t.top[k];
+        if (a == -32768) return -640;
+        if (a > y + 80) { int b = t.low[k]; return b == -32768 ? -640 : b; }
+        return a;
+    }
+    /** ground height (1/64 m) for something currently at height y: the top layer unless it is overhead (bridges) */
+    int groundH(int xm, int zm, int y) {
+        int fx = (int) (((long) (xm - mox - 1024) << 8) / 2048), fz = (int) (((long) (zm - moz - 1024) << 8) / 2048);
         int i = fx >> 8, j = fz >> 8, ax = fx & 255, az = fz & 255;
-        int h00 = hAt(i, j), h10 = hAt(i + 1, j), h01 = hAt(i, j + 1), h11 = hAt(i + 1, j + 1);
+        int h00 = hCell(i, j, y), h10 = hCell(i + 1, j, y), h01 = hCell(i, j + 1, y), h11 = hCell(i + 1, j + 1, y);
+        int mn = Math.min(Math.min(h00, h10), Math.min(h01, h11)), mx = Math.max(Math.max(h00, h10), Math.max(h01, h11));
+        if (mx - mn > 40) return ax < 128 ? (az < 128 ? h00 : h01) : (az < 128 ? h10 : h11);   // kerbs/walls: no blending across steps
         int a = h00 + (((h10 - h00) * ax) >> 8), b = h01 + (((h11 - h01) * ax) >> 8);
         return a + (((b - a) * az) >> 8);
     }
-    private int hAt(int i, int j) {
-        if (i < 0 || j < 0 || i >= hw || j >= hh) return -640;
-        int v = hgt[j * hw + i];
-        return v == -32768 ? -640 : v;
-    }
+    int groundH(int xm, int zm) { return groundH(xm, zm, 4000); }
     int surfAt(int xm, int zm) {
-        int i = (xm - hx0) / hcell, j = (zm - hz0) / hcell;
-        if (xm < hx0 || zm < hz0 || i >= hw || j >= hh) return S_WATER;
-        return surf[j * hw + i];
+        if (xm < mox || zm < moz) return S_WATER;
+        int gi = (xm - mox) / 2048, gj = (zm - moz) / 2048;
+        Tile t = tileFor(gi, gj, Tile.NH);
+        if (t == null || t.surf == null) return S_WATER;
+        return t.surf[(gj % Tile.NH) * Tile.NH + (gi % Tile.NH)];
     }
-    boolean solidCell(int i, int j) {
-        if (i < 0 || j < 0 || i >= sw || j >= sh) return false;
-        return (solid[j * srow + (i >> 3)] & (0x80 >> (i & 7))) != 0;
+    boolean solidCell(int gi, int gj) {
+        Tile t = tileFor(gi, gj, Tile.NS);
+        if (t == null || t.solid == null) return false;
+        int li = gi % Tile.NS, lj = gj % Tile.NS;
+        return (t.solid[lj * Tile.SROW + (li >> 3)] & (0x80 >> (li & 7))) != 0;
     }
-    boolean deep(int xm, int zm) { return groundH(xm, zm) < -70; }
-    boolean walkable(int xm, int zm) {
-        int s = surfAt(xm, zm);
-        if (s == S_WATER || deep(xm, zm)) return false;
-        return !solidCell((xm - sx0) / scell, (zm - sz0) / scell);
+    int scell(int m, int o) { return m < o ? -1 : (m - o) / 1024; }
+    boolean deep(int xm, int zm, int y) { return groundH(xm, zm, y) < -70; }
+    boolean walkable(int xm, int zm, int y) {
+        if (surfAt(xm, zm) == S_WATER) return false;
+        int g = groundH(xm, zm, y);
+        if (g < -70 || g > y + 56) return false;
+        return !solidCell(scell(xm, mox), scell(zm, moz));
     }
 
-    /** pushes (rx, rz) out of solid cells, radius r (mm) */
     boolean resolve(int rad) {
         boolean hit = false;
-        int i0 = (rx - rad - sx0) / scell, i1 = (rx + rad - sx0) / scell, j0 = (rz - rad - sz0) / scell, j1 = (rz + rad - sz0) / scell;
-        if (rx - rad < sx0) i0 = -1;
-        if (rz - rad < sz0) j0 = -1;
+        int i0 = scell(rx - rad, mox), i1 = scell(rx + rad, mox), j0 = scell(rz - rad, moz), j1 = scell(rz + rad, moz);
         for (int j = j0; j <= j1; j++) {
             for (int i = i0; i <= i1; i++) {
                 if (!solidCell(i, j)) continue;
-                int bx0 = sx0 + i * scell, bz0 = sz0 + j * scell, bx1 = bx0 + scell, bz1 = bz0 + scell;
+                int bx0 = mox + i * 1024, bz0 = moz + j * 1024, bx1 = bx0 + 1024, bz1 = bz0 + 1024;
                 int cx = rx < bx0 ? bx0 : (rx > bx1 ? bx1 : rx);
                 int cz = rz < bz0 ? bz0 : (rz > bz1 ? bz1 : rz);
                 int dx = rx - cx, dz = rz - cz;
@@ -155,34 +201,118 @@ final class World {
         return hit;
     }
 
-    /** moves an actor from (ox,oz,oy) towards (rx,rz): solid cells + step height; result left in rx/rz */
     boolean stepOk(int ox, int oz, int oy, int maxStep) {
-        int g = groundH(rx, rz);
-        if (g - oy <= maxStep) return true;
+        if (groundH(rx, rz, oy) - oy <= maxStep) return true;
         int nx = rx, nz = rz;
-        rx = nx; rz = oz;                                  // slide along x
-        if (groundH(rx, rz) - oy <= maxStep) return true;
-        rx = ox; rz = nz;                                  // slide along z
-        if (groundH(rx, rz) - oy <= maxStep) return true;
+        rx = nx; rz = oz;
+        if (groundH(rx, rz, oy) - oy <= maxStep) return true;
+        rx = ox; rz = nz;
+        if (groundH(rx, rz, oy) - oy <= maxStep) return true;
         rx = ox; rz = oz;
         return false;
     }
 
-    // ================================================================== simulation
+    // ================================================================== model pools
     static final int K_UP = 1, K_DOWN = 2, K_LEFT = 4, K_RIGHT = 8, K_FIRE = 16, K_CAML = 32, K_CAMR = 64, K_CAMU = 128,
             K_CAMD = 256, K_SPRINT = 512, K_HAND = 1024;
     static final int PA_NONE = 0, PA_WALKTO = 1, PA_GETIN = 2, PA_GETOUT = 3;
-    static final int NCAR_TYPES = 5;
-    static final String[] CAR_NAMES = { "admiral", "oceanic", "taxi", "pcj600", "police" };
+    static final int NPOOL = 12, NCPOOL = 10;
 
-    CarModel[] carModels = new CarModel[NCAR_TYPES];
-    PedModel pm0;
-    PedModel[] npc = new PedModel[5], npcLo = new PedModel[5];
-    int[] npcTex = new int[5];
-    static final String[] NPC_NAMES = { "cop", "construction", "hispanic", "skater", "street" };
+    String[] pedNames; int[] pedFlags;
+    PedModel pm0; int playerTex;
+    PedModel[] pool = new PedModel[NPOOL], poolLo = new PedModel[NPOOL];
+    int[] poolTex = new int[NPOOL], poolSrc = new int[NPOOL];
+    int copSlot = 0;
+    String[] carNames;
+    CarModel[] cpool = new CarModel[NCPOOL];
+    int[] cpoolSrc = new int[NCPOOL];
+    int policeSlot = 0;
+    Mesh[] weaponMesh = new Mesh[3];
+
+    void loadPools() throws IOException {
+        String[] pl = Assets.readLines("/peds.lst");
+        pedNames = new String[pl.length]; pedFlags = new int[pl.length];
+        for (int i = 0; i < pl.length; i++) { int s = pl[i].indexOf(' '); pedNames[i] = pl[i].substring(0, s); pedFlags[i] = Integer.parseInt(pl[i].substring(s + 1).trim()); }
+        carNames = Assets.readLines("/cars.lst");
+        pm0 = PedModel.load("/p_player.bin");
+        playerTex = Assets.acquire("/t_p_player.png");
+        loadPed(0, find(pedNames, "cop"));
+        for (int i = 1; i < NPOOL; i++) loadPed(i, randomAmbient());
+        loadCar(0, find(carNames, "police"));
+        String[] start = { "taxi", "admiral", "pcj600", "stallion", "cheetah", "sentinel", "faggio", "pony", "voodoo" };
+        for (int i = 1; i < NCPOOL; i++) loadCar(i, find(carNames, start[i - 1]));
+        weaponMesh[1] = loadWeapon("bat");
+        weaponMesh[2] = loadWeapon("colt45");
+    }
+    static int find(String[] a, String s) { for (int i = 0; i < a.length; i++) if (a[i].equals(s)) return i; return 0; }
+    int randomAmbient() {
+        for (int k = 0; k < 40; k++) { int i = Fx.rnd(pedNames.length); if ((pedFlags[i] & 14) == 0) return i; }
+        return 0;
+    }
+    void loadPed(int slot, int src) throws IOException {
+        if (pool[slot] != null) Assets.release(poolTex[slot]);
+        String n = pedNames[src];
+        pool[slot] = PedModel.load("/p_" + n + ".bin");
+        poolLo[slot] = PedModel.load("/p_" + n + "_lo.bin");
+        poolTex[slot] = Assets.acquire("/t_p_" + n + ".png");
+        poolSrc[slot] = src;
+    }
+    void loadCar(int slot, int src) throws IOException {
+        if (cpool[slot] != null) cpool[slot].unload();
+        CarModel m = CarModel.load(carNames[src]);
+        handling(m);
+        cpool[slot] = m; cpoolSrc[slot] = src;
+    }
+    Mesh loadWeapon(String n) {
+        try {
+            DataInputStream d = new DataInputStream(new ByteArrayInputStream(Assets.readAll("/w_" + n + ".bin")));
+            int[] t = CarModel.readTex(d);
+            Mesh m = CarModel.readMesh(d, t)[0];
+            d.close();
+            return m;
+        } catch (Exception e) { return null; }
+    }
+
+    static final String SPORTS = " banshee cheetah infernus comet stinger deluxo pheonix sabretur hotring hotrina hotrinb bloodra bloodrb vicechee cuban sentxs ";
+    static final String HEAVY = " benson boxville mule packer linerun flatbed trash barracks firetruk bus coach securica enforcer ambulan yankee rumpo pony burrito spand topfun mrwhoop walton bobcat rancher landstal patriot sandking fbiranch moonbeam ";
+    static final String BIKE = " angel freeway pcj600 sanchez faggio pizzaboy ";
+    static final String SLOW = " caddy baggage ";
+    /** handling.cfg-like classes: top speed km/h, acceleration, steering lock, mass, tyre grip */
+    void handling(CarModel m) {
+        String k = " " + m.name + " ";
+        int mv = 160, ac = 22, lk = 32, mass = 1500, grip = 100, cls = 0;
+        if (BIKE.indexOf(k) >= 0) { mv = m.name.equals("faggio") || m.name.equals("pizzaboy") ? 100 : 180; ac = 30; lk = 38; mass = 350; grip = 130; cls = 3; }
+        else if (SPORTS.indexOf(k) >= 0) { mv = 200; ac = 30; lk = 30; mass = 1300; grip = 125; cls = 1; }
+        else if (HEAVY.indexOf(k) >= 0) { mv = 130; ac = 15; lk = 30; mass = 3500; grip = 85; cls = 2; }
+        else if (SLOW.indexOf(k) >= 0) { mv = 60; ac = 12; lk = 40; mass = 500; grip = 110; cls = 4; }
+        if (m.name.equals("police") || m.name.equals("fbicar")) { mv = 190; ac = 26; }
+        m.vmax = mv * 10 / 36; m.accel = ac * 20; m.brake = 1100; m.lockDeg = lk; m.mass = mass; m.grip = grip; m.cls = cls;
+        m.wheelbase = m.dimZ * 16 * 6 / 10;
+        if (m.wheelbase < 900) m.wheelbase = 900;
+    }
+
+    int poolT;
+    /** every ~40 s swap one unused ped model and one unused car model (variety with bounded memory) */
+    void rotatePools(int dt) {
+        poolT += dt;
+        if (poolT < 40000) return;
+        poolT = 0;
+        try {
+            int s = 1 + Fx.rnd(NPOOL - 1);
+            boolean used = false;
+            for (int i = 0; i < nped; i++) if (peds[i].kind == s && (peds[i].state != Ped.DEAD || peds[i].deadT >= 0)) used = true;
+            if (!used) loadPed(s, randomAmbient());
+            int c = 1 + Fx.rnd(NCPOOL - 1);
+            used = false;
+            for (int i = 0; i < ncars; i++) if (cars[i].type == c) used = true;
+            if (!used) loadCar(c, Fx.rnd(carNames.length));
+        } catch (Exception e) { }
+    }
+
+    // ================================================================== state
     byte[] tc;
-    int cIdle, cWalk, cWalkB, cRun, cCiviWalk, cCiviRun, cWomanWalk, cWomanRun, cWomanIdle, cPunch, cJab, cKick,
-            cHitF, cHitB, cKoF, cKoB, cGetup, cCower, cOpen, cGetin, cGetout, cPull, cJacked, cSit, cFight;
+    int cIdle, cWalk, cWalkB, cRun, cCiviWalk, cCiviRun, cWomanWalk, cWomanRun, cWomanIdle, cPunch, cJab, cHeavy,
+            cHitF, cHitB, cKoF, cKoB, cGetup, cOpen, cGetin, cGetout, cPull, cJacked, cSit, cSprint;
 
     Ped player;
     Car inCar, pActCar;
@@ -192,175 +322,158 @@ final class World {
     Ped[] peds = new Ped[40];
     int nped;
     int money, health = 100, armor, wanted, pedsHit, carsStolen, kills;
-    int quietKills, quietLimit = 4;     // kills nobody (no cop) saw; at 3..5 you get a star anyway
-    int wantedCalmT;                     // ms without a cop near you
+    int quietKills, quietLimit = 4;
+    int wantedCalmT;
     int minutes = 14 * 60 + 18, clockMs;
     int camYawOff, camYaw, camPitch = 55, camIdle, camXm, camYm, camZm;
     int camDistMm = 4300;
     String help; int helpT, helpShown;
     int wastedT, dayCount, bustedT, drownT;
     boolean busted;
-    int drawDist = 110;
+    int drawDist = 150;
     int brightness = 10;
     int time;
     int rx, rz;
     int shake;
     boolean runMode;
+    int weapon;                      // 0 fists, 1 bat, 2 pistol
+    boolean hasBat, hasPistol;
+    int ammo, shotCd, aimT, flashT;
+    int npick;
+    int[] pkX = new int[8], pkZ = new int[8], pkY = new int[8], pkType = new int[8], pkT = new int[8];
     private final int[] pose = new int[93], pose2 = new int[93];
 
     void initClips() {
         cIdle = AnimData.find("IDLE_stance"); cWalk = AnimData.find("WALK_player"); cWalkB = AnimData.find("walk_back");
         cRun = AnimData.find("run_player"); cCiviWalk = AnimData.find("WALK_civi"); cCiviRun = AnimData.find("run_civi");
         cWomanWalk = AnimData.find("WOMAN_walknorm"); cWomanRun = AnimData.find("woman_run"); cWomanIdle = AnimData.find("woman_idlestance");
-        cPunch = AnimData.find("FIGHTppunch"); cJab = AnimData.find("FIGHTjab");
-        cKick = AnimData.find("FIGHTpunch");   // 3rd hit: the heavy punch (FIGHTkick does not survive the 9-part rig retarget)
+        cPunch = AnimData.find("FIGHTppunch"); cJab = AnimData.find("FIGHTjab"); cHeavy = AnimData.find("FIGHTpunch");
         cHitF = AnimData.find("HIT_front"); cHitB = AnimData.find("HIT_back"); cKoF = AnimData.find("KO_shot_front"); cKoB = AnimData.find("KO_skid_back");
-        cGetup = AnimData.find("getup"); cCower = AnimData.find("cower"); cOpen = AnimData.find("CAR_open_LHS");
+        cSprint = AnimData.find("sprint_civi");
+        cGetup = AnimData.find("getup"); cOpen = AnimData.find("CAR_open_LHS");
         cGetin = AnimData.find("CAR_getin_LHS"); cGetout = AnimData.find("CAR_getout_LHS"); cPull = AnimData.find("CAR_pullout_LHS");
-        for (int i = 0; i < 5; i++) npcTex[i] = Assets.idOf("npc_" + NPC_NAMES[i]);
-        cJacked = AnimData.find("CAR_jackedLHS"); cSit = AnimData.find("CAR_sit"); cFight = AnimData.find("FIGHTIDLE");
-        // handling.cfg (km/h, accel), scaled for the small map
-        int[] mv = { 165, 150, 160, 190, 190 }, ac = { 22, 20, 22, 32, 26 }, lk = { 30, 30, 34, 38, 32 };
-        for (int i = 0; i < NCAR_TYPES; i++) {
-            CarModel m = carModels[i];
-            if (m == null) continue;
-            m.vmax = mv[i] * 6 / 36; m.accel = ac[i] * 14; m.brake = 900; m.lockDeg = lk[i];
-            m.wheelbase = m.dimZ * 16 * 6 / 10;
-        }
+        cJacked = AnimData.find("CAR_jackedLHS"); cSit = AnimData.find("CAR_sit");
     }
 
-    void assignKind(Ped p, int k) { p.kind = k; p.tex = npcTex[k]; p.female = k >= 3; }
+    void assignKind(Ped p, int slot) { p.kind = slot; p.tex = poolTex[slot]; int f = pedFlags[poolSrc[slot]]; p.female = (f & 1) != 0; p.gang = (f & 4) != 0; }
 
     void reset() {
-        Fx.seed = 99991;
+        Fx.seed = (int) System.currentTimeMillis();
         initClips();
         player = new Ped();
         placePlayerAtSpawn();
-        player.tex = Assets.T_PED0; player.loco = cIdle;
+        player.tex = playerTex; player.loco = cIdle;
         inCar = null; pActCar = null; pAct = 0;
         ncars = 0; nped = 0;
         health = 100; armor = 0; money = 0; wanted = 0; pedsHit = 0; carsStolen = 0; kills = 0; quietKills = 0; quietLimit = 3 + Fx.rnd(3);
         minutes = 14 * 60 + 18; wastedT = 0; helpShown = 0; helpT = 0; busted = false; bustedT = 0; drownT = 0; runMode = false;
+        weapon = 0; hasBat = false; hasPistol = false; ammo = 0;
         camYawOff = 0; camYaw = player.yaw; camPitch = 55;
-        int[] types = { Car.ADMIRAL, Car.OCEANIC, Car.TAXI, Car.PCJ600 };
-        for (int i = 0; i < nslot && i < 4; i++) {
-            Car c = addCar(Car.PARKED, types[i], slotX[i], slotZ[i], slotYaw[i], i == 0 ? 4 : i + 1);
-            c.y = groundH(c.x, c.z);
-        }
-        for (int i = 0; i < 3; i++) spawnTraffic(true);
-        for (int i = 0; i < 14; i++) spawnPed(true);
+        preload(player.x, player.z);
+        npick = 0;
+        addPickup(2, 2600, 1200);
+        addPickup(1, -2200, 1800);
+        for (int i = 0; i < 7; i++) spawnTraffic(true);
+        for (int i = 0; i < 18; i++) spawnPed(true);
+        say("Welcome to Vice City.   0: walk / run   2 4 6 8: camera   3: switch weapon");
+    }
+    void addPickup(int type, int fwd, int side) {
+        int fx = Fx.sin(player.yaw), fz = Fx.cos(player.yaw);
+        rx = player.x + ((fx * fwd + fz * side) >> 14); rz = player.z + ((fz * fwd - fx * side) >> 14);
+        if (!walkable(rx, rz, player.y)) { rx = player.x + ((fx * fwd) >> 14); rz = player.z + ((fz * fwd) >> 14); }
+        pkX[npick] = rx; pkZ[npick] = rz; pkY[npick] = groundH(rx, rz, player.y); pkType[npick] = type; pkT[npick] = 0; npick++;
     }
 
     void placePlayerAtSpawn() {
-        player.x = spX; player.z = spZ; player.yaw = spYaw; player.y = groundH(spX, spZ);
+        player.x = spX; player.z = spZ; player.yaw = spYaw; player.y = spY;
         player.state = Ped.WALK; player.hp = 100; player.clip = -1; player.seat = null; player.speed = 0;
     }
 
-    Car addCar(int mode, int type, int xm, int zm, int yaw, int colorIdx) {
-        if (ncars >= cars.length) return null;
+    Car addCar(int mode, int slot, int xm, int zm, int yaw, int colorIdx) {
+        if (ncars >= cars.length || cpool[slot] == null) return null;
         Car c = new Car();
-        c.mode = mode; c.type = type; c.x = xm; c.z = zm; c.yaw = yaw & 1023; c.y = groundH(xm, zm);
+        c.mode = mode; c.type = slot; c.x = xm; c.z = zm; c.yaw = yaw & 1023; c.y = groundH(xm, zm);
         c.color = Car.COLORS[colorIdx % Car.COLORS.length];
-        if (type == Car.TAXI) { c.color = 0xF0C820; c.color2 = 0xF0C820; }
-        if (type == Car.POLICE_CAR) { c.color = 0xF4F4F4; c.color2 = 0x202430; }
-        if (type == Car.PCJ600) c.color2 = 0x303030;
+        c.color2 = Car.COLORS[(colorIdx + 3) % Car.COLORS.length];
+        String n = cpool[slot].name;
+        if (n.equals("taxi") || n.equals("cabbie") || n.equals("zebra")) { c.color = 0xF0C820; c.color2 = 0xF0C820; }
+        if (n.equals("police")) { c.color = 0xF4F4F4; c.color2 = 0x202430; }
         cars[ncars++] = c;
         return c;
     }
-
     void removeCar(int i) {
         Car c = cars[i];
-        if (c.driver != null) { c.driver.seat = null; c.driver.state = Ped.DEAD; c.driver.timer = 0; c.driver.hp = 0; c.driver.deadT = -1; c.driver = null; }
+        if (c.driver != null) { c.driver.seat = null; c.driver.state = Ped.DEAD; c.driver.timer = 0; c.driver.hp = 0; c.driver.deadT = -1; c.driver.cop = false; c.driver = null; }
         cars[i] = cars[ncars - 1]; ncars--;
     }
-
     void addDriver(Car c, boolean cop) {
         Ped d = null;
-        for (int i = 0; i < nped; i++) if (peds[i].state == Ped.DEAD && peds[i].deadT < 0 && peds[i].seat == null && !peds[i].cop) { d = peds[i]; break; }
+        for (int i = 0; i < nped; i++) if (peds[i].state == Ped.DEAD && peds[i].deadT < 0 && peds[i].seat == null) { d = peds[i]; break; }
         if (d == null) { if (nped >= peds.length) return; d = new Ped(); peds[nped++] = d; }
-        d.seat = c; c.driver = d; d.cop = cop; assignKind(d, cop ? 0 : 1 + Fx.rnd(4)); d.state = Ped.IDLE; d.loco = cIdle; d.hp = 100; d.clip = -1; d.deadT = 0;
+        d.seat = c; c.driver = d; d.cop = cop; assignKind(d, cop ? copSlot : 1 + Fx.rnd(NPOOL - 1)); d.state = Ped.IDLE; d.loco = cIdle; d.hp = 100; d.clip = -1; d.deadT = 0; d.angry = false;
     }
+    int vmaxOf(Car c) { return cpool[c.type].vmax * 1024; }
+    CarModel cm(Car c) { return cpool[c.type]; }
 
-    int vmaxOf(Car c) { CarModel m = carModels[c.type]; return m != null ? m.vmax * 1024 : 24 * 1024; }
-
-    /** random position around the player at distance [d0,d1] metres satisfying a surface rule; returns false if none */
     final int[] spot = new int[2];
     boolean findSpot(int d0, int d1, int want) {
         for (int k = 0; k < 24; k++) {
             int a = Fx.rnd(1024), d = (d0 + Fx.rnd(d1 - d0 + 1)) * 1024;
             int x = player.x + ((Fx.sin(a) * (d >> 4)) >> 10), z = player.z + ((Fx.cos(a) * (d >> 4)) >> 10);
             int s = surfAt(x, z);
-            boolean ok = want == S_ROAD ? s == S_ROAD : (s != S_WATER && s != S_ROAD && walkable(x, z));
+            boolean ok;
+            if (want == S_ROAD) ok = s == S_ROAD && !deep(x, z, 4000);
+            else { int g = groundH(x, z, 4000); ok = s != S_WATER && s != S_ROAD && walkable(x, z, g); }
             if (ok) { spot[0] = x; spot[1] = z; return true; }
         }
         return false;
     }
-
-    /** direction (yaw) with the longest road run from a point */
     int roadYaw(int x, int z) {
         int best = 0, bl = -1;
         for (int a = 0; a < 1024; a += 64) {
             int l = 0;
-            for (int s = 2; s <= 24; s += 2) {
-                if (surfAt(x + ((Fx.sin(a) * s) >> 4), z + ((Fx.cos(a) * s) >> 4)) != S_ROAD) break;
-                l++;
-            }
+            for (int s = 2; s <= 24; s += 2) { if (surfAt(x + ((Fx.sin(a) * s) >> 4), z + ((Fx.cos(a) * s) >> 4)) != S_ROAD) break; l++; }
             if (l > bl) { bl = l; best = a; }
         }
         return best;
     }
-
     void spawnTraffic(boolean initial) {
-        if (!findSpot(initial ? 20 : 70, initial ? 90 : 110, S_ROAD)) return;
-        int type = Fx.rnd(10) < 3 ? Car.TAXI : (Fx.rnd(2) == 0 ? Car.ADMIRAL : Car.OCEANIC);
-        if (Fx.rnd(8) == 0) type = Car.PCJ600;
-        Car c = addCar(Car.TRAFFIC, type, spot[0], spot[1], roadYaw(spot[0], spot[1]), Fx.rnd(10));
+        if (!findSpot(initial ? 25 : 80, initial ? 110 : 130, S_ROAD)) return;
+        Car c = addCar(Car.TRAFFIC, 1 + Fx.rnd(NCPOOL - 1), spot[0], spot[1], roadYaw(spot[0], spot[1]), Fx.rnd(10));
         if (c == null) return;
-        c.speed = 4 * 1024;
+        c.vx = (Fx.sin(c.yaw) * 6) >> 4; c.vz = (Fx.cos(c.yaw) * 6) >> 4; c.speed = 6 * 1024;
         addDriver(c, false);
     }
-
     void spawnPed(boolean initial) {
-        if (!findSpot(initial ? 8 : 45, initial ? 70 : 80, S_PAVE)) return;
+        if (!findSpot(initial ? 8 : 50, initial ? 75 : 85, S_PAVE)) return;
         Ped p = null;
         for (int i = 0; i < nped; i++) if (peds[i].state == Ped.DEAD && peds[i].timer <= 0 && !peds[i].cop && peds[i].seat == null) { p = peds[i]; break; }
-        if (p == null) {
-            if (nped >= peds.length) return;
-            p = new Ped();
-            peds[nped++] = p;
-        }
+        if (p == null) { if (nped >= peds.length) return; p = new Ped(); peds[nped++] = p; }
         p.x = spot[0]; p.z = spot[1];
-        p.state = Ped.WALK; p.hp = 100; p.cash = 0; p.cop = false; p.clip = -1; p.clipNext = -1; p.seat = null; p.deadT = 0;
+        p.state = Ped.WALK; p.hp = 100; p.cash = 0; p.cop = false; p.clip = -1; p.clipNext = -1; p.seat = null; p.deadT = 0; p.angry = false; p.aimT = 0;
         p.yaw = Fx.rnd(1024); p.targetYaw = p.yaw;
         p.speed = 1150 + Fx.rnd(350);
-        assignKind(p, 1 + Fx.rnd(4));
+        assignKind(p, 1 + Fx.rnd(NPOOL - 1));
+        p.brave = p.gang || (!p.female && Fx.rnd(10) < 3);
         p.turnTimer = 1500 + Fx.rnd(4000);
         p.locoT = Fx.rnd(1000);
         p.y = groundH(p.x, p.z);
         p.timer = 0;
     }
-
     Ped spawnCopAt(int x, int z) {
         Ped p = null;
         for (int i = 0; i < nped; i++) if (peds[i].state == Ped.DEAD && peds[i].timer <= 0 && peds[i].seat == null) { p = peds[i]; break; }
         if (p == null) { if (nped >= peds.length) return null; p = new Ped(); peds[nped++] = p; }
-        p.x = x; p.z = z; p.cop = true; assignKind(p, 0); p.hp = 160; p.state = Ped.WALK; p.speed = 0; p.clip = -1; p.seat = null;
-        p.deadT = 0; p.cash = 0; p.closeT = 0; p.attackCd = 1500; p.y = groundH(x, z); p.yaw = Fx.yawOf(player.x - x, player.z - z);
+        p.x = x; p.z = z; p.cop = true; assignKind(p, copSlot); p.hp = 160; p.state = Ped.WALK; p.speed = 0; p.clip = -1; p.seat = null;
+        p.deadT = 0; p.cash = 0; p.closeT = 0; p.attackCd = 1500; p.y = groundH(x, z, player.y); p.yaw = Fx.yawOf(player.x - x, player.z - z); p.angry = false; p.aimT = 0;
         return p;
     }
-
-    void spawnCop() {
-        if (findSpot(28, 42, S_PAVE)) spawnCopAt(spot[0], spot[1]);
-    }
-
+    void spawnCop() { if (findSpot(28, 42, S_PAVE)) spawnCopAt(spot[0], spot[1]); }
     void spawnPoliceCar() {
         if (!findSpot(60, 90, S_ROAD)) return;
-        Car c = addCar(Car.POLICE, Car.POLICE_CAR, spot[0], spot[1], Fx.yawOf(player.x - spot[0], player.z - spot[1]), 0);
-        if (c == null) return;
-        c.speed = 6 * 1024;
-        addDriver(c, true);
+        Car c = addCar(Car.POLICE, policeSlot, spot[0], spot[1], Fx.yawOf(player.x - spot[0], player.z - spot[1]), 0);
+        if (c != null) addDriver(c, true);
     }
-
     int copsNear(int rangeMm) {
         int n = 0;
         for (int i = 0; i < nped; i++) {
@@ -371,21 +484,12 @@ final class World {
         }
         return n;
     }
-    void raiseWanted(int lvl) {
-        if (wanted < lvl) { wanted = lvl; wantedCalmT = 0; }
-    }
-
-    void say(String s) { help = s; helpT = 4500; }
+    void raiseWanted(int lvl) { if (wanted < lvl) { wanted = lvl; wantedCalmT = 0; } }
+    void say(String s) { help = s; helpT = 5000; }
 
     // ------------------------------------------------------------------ clips
-    void startClip(Ped p, int clip, int next, int endMs) {
-        p.clip = clip; p.clipT = 0; p.clipNext = next; p.clipEnd = endMs; p.hitDone = false;
-    }
-    int clipLen(Ped p) {
-        int l = AnimData.len(p.clip);
-        return p.clipEnd > 0 && p.clipEnd < l ? p.clipEnd : l;
-    }
-    /** advances the one-shot clip; returns true at the moment it finishes */
+    void startClip(Ped p, int clip, int next, int endMs) { p.clip = clip; p.clipT = 0; p.clipNext = next; p.clipEnd = endMs; p.hitDone = false; }
+    int clipLen(Ped p) { int l = AnimData.len(p.clip); return p.clipEnd > 0 && p.clipEnd < l ? p.clipEnd : l; }
     boolean stepClip(Ped p, int dt) {
         if (p.clip < 0) return false;
         p.clipT += dt;
@@ -393,7 +497,7 @@ final class World {
         if (p.clipT < len) return false;
         if (p.clipNext == -2) { p.clipT = len; return false; }
         if (p.clip == cGetout || p.clip == cGetin || p.clip == cPull || p.clip == cJacked || p.clip == cOpen) {
-            AnimData.sample(p.clip, len, pose2);           // car clips move the root: keep the final offset
+            AnimData.sample(p.clip, len, pose2);
             int offR = pose2[90] * 16, offF = pose2[92] * 16, c = Fx.cos(p.yaw), s = Fx.sin(p.yaw);
             p.x += (offR * c + offF * s) >> 14; p.z += (-offR * s + offF * c) >> 14;
         }
@@ -407,6 +511,7 @@ final class World {
         else {
             if (speed < 0) c = cWalkB;
             else if (sp < 3000) c = p == player ? cWalk : (f ? cWomanWalk : cCiviWalk);
+            else if (sp > 6000 && p != player) c = cSprint;
             else c = p == player || p.cop ? cRun : (f ? cWomanRun : cCiviRun);
             int ratio = sp * 256 / AnimData.speed(c);
             if (ratio < 90) ratio = 90; if (ratio > 560) ratio = 560;
@@ -416,41 +521,71 @@ final class World {
     }
 
     // ------------------------------------------------------------------ update
-    void update(int dt, int keys, boolean fire, boolean enter, boolean toggleRun) {
+    void update(int dt, int keys, boolean fire, boolean enter, boolean toggleRun, boolean nextWeapon) {
         if (dt > 100) dt = 100;
         time += dt;
         clockMs += dt;
         while (clockMs >= 1000) { clockMs -= 1000; minutes++; if (minutes >= 1440) { minutes = 0; dayCount++; } }
         if (helpT > 0) helpT -= dt;
         if (shake > 0) shake -= dt;
+        if (shotCd > 0) shotCd -= dt;
+        if (aimT > 0) aimT -= dt;
+        if (flashT > 0) flashT -= dt;
+        streamTiles(player.x, player.z);
+        rotatePools(dt);
         if (busted) {
-            bustedT += dt;
-            updateWorld(dt); updateCamera(dt, keys);
+            bustedT += dt; updateWorld(dt); updateCamera(dt, keys);
             if (bustedT > 3600) { busted = false; bustedT = 0; arrestRespawn(); }
             return;
         }
         if (health <= 0) {
-            if (wastedT == 0) { player.seat = null; if (inCar != null) { inCar.mode = Car.PARKED; inCar = null; } pAct = 0; startClip(player, cKoF, -2, 0); }
-            wastedT += dt;
-            stepClip(player, dt);
+            if (wastedT == 0) { player.seat = null; if (inCar != null) { inCar.mode = Car.PARKED; inCar = null; } pAct = 0; startClip(player, cKoF, -2, 0); Snd.engine(false, 0); }
+            wastedT += dt; stepClip(player, dt);
             if (wastedT > 3600) respawn();
-            updateWorld(dt);
-            updateCamera(dt, keys);
+            updateWorld(dt); updateCamera(dt, keys);
             return;
         }
         if (toggleRun && inCar == null) { runMode = !runMode; say(runMode ? "Run: ON" : "Run: OFF  (walking)"); helpT = 1600; }
+        if (nextWeapon && inCar == null) cycleWeapon();
         if (pAct != 0) updateAct(dt);
         else {
             if (enter) handleEnter();
             if (pAct == 0) { if (inCar != null) updateDriving(dt, keys); else updateOnFoot(dt, keys, fire); }
         }
-        // drowning: Tommy can't swim
-        boolean inWater = inCar != null ? deep(inCar.x, inCar.z) : (pAct == 0 && deep(player.x, player.z));
-        if (inWater) { drownT += dt; if (inCar != null) inCar.speed = inCar.speed * 9 / 10; if (drownT > 1500) { health = 0; wastedT = 0; say("Tommy can't swim!"); } }
-        else drownT = 0;
+        boolean inWater = inCar != null ? deep(inCar.x, inCar.z, inCar.y) : (pAct == 0 && deep(player.x, player.z, player.y));
+        if (inWater) {
+            if (drownT == 0) Snd.play(Snd.SPLASH);
+            drownT += dt; if (inCar != null) { inCar.vx = inCar.vx * 9 / 10; inCar.vz = inCar.vz * 9 / 10; }
+            if (drownT > 1500) { health = 0; wastedT = 0; say("Tommy can't swim!"); }
+        } else drownT = 0;
+        updatePickups(dt);
         updateWorld(dt);
         updateCamera(dt, keys);
         updateWanted(dt);
+        Snd.engine(inCar != null && !inCar.wrecked, inCar != null ? Fx.abs(inCar.speed) * 100 / Math.max(1, vmaxOf(inCar)) : 0);
+        boolean siren = false;
+        for (int i = 0; i < ncars; i++) if (cars[i].mode == Car.POLICE && Fx.dist(cars[i].x - player.x, cars[i].z - player.z) < 90000) siren = true;
+        Snd.siren(siren);
+    }
+
+    void cycleWeapon() {
+        for (int k = 0; k < 3; k++) {
+            weapon = (weapon + 1) % 3;
+            if (weapon == 0 || (weapon == 1 && hasBat) || (weapon == 2 && hasPistol && ammo > 0)) break;
+        }
+        say(weapon == 0 ? "Fists" : (weapon == 1 ? "Baseball bat" : "Pistol  (" + ammo + ")")); helpT = 1200;
+    }
+    void updatePickups(int dt) {
+        for (int i = 0; i < npick; i++) {
+            if (pkT[i] > 0) { pkT[i] -= dt; continue; }
+            if (inCar == null && Fx.dist(pkX[i] - player.x, pkZ[i] - player.z) < 1200) {
+                if (pkType[i] == 2) { hasPistol = true; ammo += 68; weapon = 2; say("Pistol - hold fire to shoot, it locks on to the nearest person"); }
+                else { hasBat = true; weapon = 1; say("Baseball bat"); }
+                helpT = 2500;
+                Snd.play(Snd.PICKUP);
+                pkT[i] = 30000;
+            }
+        }
     }
 
     void updateWanted(int dt) {
@@ -470,38 +605,34 @@ final class World {
     void respawn() {
         wastedT = 0; health = 100; armor = 0;
         money = money > 100 ? money - 100 : 0;
-        wanted = 0; quietKills = 0;
-        placePlayerAtSpawn();
-        clearCops();
-        say("You have been treated at the Ocean Beach clinic. $100 fee.");
+        wanted = 0; quietKills = 0; weapon = 0; hasPistol = false; hasBat = false; ammo = 0;
+        placePlayerAtSpawn(); preload(player.x, player.z); clearCops();
+        say("You have been treated. $100 fee.");
     }
     void arrestRespawn() {
         money = money > 100 ? money - 100 : 0;
-        wanted = 0; quietKills = 0;
-        placePlayerAtSpawn();
-        clearCops();
-        say("Busted! $100 bail.");
+        wanted = 0; quietKills = 0; weapon = 0; hasPistol = false; hasBat = false; ammo = 0;
+        placePlayerAtSpawn(); preload(player.x, player.z); clearCops();
+        say("Busted! $100 bail. Weapons confiscated.");
     }
     void clearCops() {
         for (int i = nped - 1; i >= 0; i--) if (peds[i].cop && peds[i].seat == null) { peds[i] = peds[nped - 1]; nped--; }
         for (int i = ncars - 1; i >= 0; i--) if (cars[i].mode == Car.POLICE) removeCar(i);
     }
 
-    // ---- car <-> world helpers (local units 1/64 m, x right, z forward)
     int localX(Car c, int lx, int lz) { return c.x + (((Fx.cos(c.yaw) * lx + Fx.sin(c.yaw) * lz) >> 14) * 16); }
     int localZ(Car c, int lx, int lz) { return c.z + (((-Fx.sin(c.yaw) * lx + Fx.cos(c.yaw) * lz) >> 14) * 16); }
-    int seatLX(Car c) { CarModel m = carModels[c.type]; return m.bike ? 0 : -Fx.abs(m.seatX); }
-    int seatLZ(Car c) { return carModels[c.type].seatZ; }
+    int seatLX(Car c) { CarModel m = cm(c); return m.bike ? 0 : -Fx.abs(m.seatX); }
+    int seatLZ(Car c) { return cm(c).seatZ; }
 
     void handleEnter() {
         if (inCar != null) {
-            Car c = inCar;
-            Ped p = player;
+            Car c = inCar; Ped p = player;
             p.x = localX(c, seatLX(c), seatLZ(c)); p.z = localZ(c, seatLX(c), seatLZ(c)); p.yaw = c.yaw; p.y = c.y;
-            p.seat = null;
-            c.mode = Car.PARKED;
-            inCar = null;
-            if (carModels[c.type].bike) { p.x = localX(c, -60, 0); p.z = localZ(c, -60, 0); p.clip = -1; p.y = groundH(p.x, p.z); return; }
+            p.seat = null; c.mode = Car.PARKED; inCar = null;
+            Snd.engine(false, 0);
+            if (cm(c).bike) { p.x = localX(c, -60, 0); p.z = localZ(c, -60, 0); p.clip = -1; p.y = groundH(p.x, p.z, c.y); return; }
+            Snd.play(Snd.DOOR_OPEN);
             startClip(p, cGetout, -1, 0);
             pAct = PA_GETOUT;
             return;
@@ -518,13 +649,13 @@ final class World {
 
     void updateAct(int dt) {
         Car c = pActCar; Ped p = player;
-        boolean bike = carModels[c.type].bike;
+        boolean bike = cm(c).bike;
         if (pAct == PA_WALKTO) {
             int tx = bike ? localX(c, -60, 0) : localX(c, seatLX(c) - 59, seatLZ(c) - 34), tz = bike ? localZ(c, -60, 0) : localZ(c, seatLX(c) - 59, seatLZ(c) - 34);
             int dx = tx - p.x, dz = tz - p.z, d = Fx.dist(dx, dz);
             if (d < 450) {
                 p.x = tx; p.z = tz; p.yaw = c.yaw; p.speed = 0;
-                if (c.driver != null && c.driver.seat == c) {          // carjack: pull the driver out
+                if (c.driver != null && c.driver.seat == c) {
                     Ped v = c.driver;
                     v.seat = null; c.driver = null;
                     v.x = localX(c, seatLX(c), seatLZ(c)); v.z = localZ(c, seatLX(c), seatLZ(c)); v.yaw = c.yaw; v.y = c.y;
@@ -532,17 +663,16 @@ final class World {
                     startClip(v, cJacked, cGetup, 0);
                     if (v.cop) raiseWanted(2); else if (copsNear(30 * 1024) > 0) raiseWanted(1);
                     pedsHit++;
-                    if (bike) { pAct = PA_GETIN; p.clip = -1; }
-                    else startClip(p, cPull, cGetin, 0);
+                    if (bike) p.clip = -1; else startClip(p, cPull, cGetin, 0);
                 } else if (bike) p.clip = -1;
-                else startClip(p, cOpen, cGetin, 0);
+                else { startClip(p, cOpen, cGetin, 0); Snd.play(Snd.DOOR_OPEN); }
                 pAct = PA_GETIN;
             } else {
                 int want = Fx.yawOf(dx, dz);
                 p.yaw = (p.yaw + Fx.clamp(Fx.angDiff(p.yaw, want), -700 * dt / 1000, 700 * dt / 1000)) & 1023;
                 int sp = 4200;
                 p.x += ((Fx.sin(p.yaw) * sp) >> 14) * dt / 1000; p.z += ((Fx.cos(p.yaw) * sp) >> 14) * dt / 1000;
-                p.y = groundH(p.x, p.z);
+                p.y = groundH(p.x, p.z, p.y);
                 p.speed = sp; selectLoco(p, dt, sp);
             }
         } else if (pAct == PA_GETIN) {
@@ -550,19 +680,23 @@ final class World {
             if (p.clip < 0) {
                 inCar = c; c.mode = Car.PLAYER; p.seat = c; p.speed = 0; pAct = 0; carsStolen++;
                 p.x = c.x; p.z = c.z;
-                if (c.type == Car.POLICE_CAR) raiseWanted(1);
+                if (!bike) Snd.play(Snd.DOOR_CLOSE);
+                if (cm(c).name.equals("police")) raiseWanted(1);
             }
         } else if (pAct == PA_GETOUT) {
             stepClip(p, dt);
-            if (p.clip < 0) { pAct = 0; p.y = groundH(p.x, p.z); }
+            if (p.clip < 0) { pAct = 0; p.y = groundH(p.x, p.z, p.y); Snd.play(Snd.DOOR_CLOSE); }
         }
     }
 
     void updateOnFoot(int dt, int keys, boolean fire) {
         Ped p = player;
-        if (p.clip >= 0) {                                   // fighting animation in progress
+        if (p.clip >= 0) {
             stepClip(p, dt);
-            if (p.clip >= 0 && !p.hitDone && p.clipT >= (p.clip == cKick ? 330 : 170)) { p.hitDone = true; doPunch(p.clip == cKick ? 45 : 28); }
+            if (p.clip >= 0 && !p.hitDone && p.clipT >= (p.clip == cHeavy ? 330 : 170)) {
+                p.hitDone = true;
+                doPunch(weapon == 1 ? 55 : (p.clip == cHeavy ? 45 : 28), weapon == 1 ? 2200 : 1700);
+            }
             p.speed = 0;
             return;
         }
@@ -576,20 +710,25 @@ final class World {
         boolean sprint = (keys & K_SPRINT) != 0;
         if (move > 0) sp = sprint ? 6600 : (runMode ? 4800 : 1700);
         else if (move < 0) sp = runMode ? -2600 : -1700;
-        p.speed = sp;
-        if (fire) {
-            // 1-2-3 combo: jab, punch, kick (each one-shot, played in place)
+        if (weapon == 2 && hasPistol) {
+            if ((keys & K_FIRE) != 0) { aimT = 900; shoot(); }
+        } else if (fire) {
+            if (weapon == 1) { startClip(p, cHeavy, -1, 0); Snd.play(Snd.SWING); return; }
             combo = combo % 3 + 1;
-            if (combo == 1) startClip(p, cJab, -1, 560); else if (combo == 2) startClip(p, cPunch, -1, 0); else startClip(p, cKick, -1, 0);
+            if (combo == 1) startClip(p, cJab, -1, 560); else if (combo == 2) startClip(p, cPunch, -1, 0); else startClip(p, cHeavy, -1, 0);
             return;
         }
+        if (aimT > 0 && sp > 1700) sp = 1700;
+        p.speed = sp;
         rx = p.x + ((Fx.sin(p.yaw) * sp) >> 14) * dt / 1000;
         rz = p.z + ((Fx.cos(p.yaw) * sp) >> 14) * dt / 1000;
         resolve(300);
         stepOk(p.x, p.z, p.y, 60);
         for (int i = 0; i < ncars; i++) {
             Car c = cars[i];
-            int half = carModels[c.type].bike ? 600 : 1300, rr = carModels[c.type].bike ? 300 + 450 : 300 + 900;
+            CarModel m = cm(c);
+            int half = m.bike ? 600 : m.dimZ * 16 / 2 - 900, rr = m.bike ? 750 : m.dimX * 16 / 2 + 350;
+            if (half < 0) half = 0;
             for (int k = -1; k <= 1; k++) {
                 int cx = c.x + ((Fx.sin(c.yaw) * k * half) >> 14), cz = c.z + ((Fx.cos(c.yaw) * k * half) >> 14);
                 int dx = rx - cx, dz = rz - cz;
@@ -601,12 +740,41 @@ final class World {
         int mv = Fx.dist(rx - p.x, rz - p.z);
         p.x = rx; p.z = rz;
         selectLoco(p, dt, mv == 0 && sp != 0 ? sp / 6 : sp);
-        int gy = groundH(p.x, p.z);
-        if (gy < p.y - 4) p.y += Math.max(gy - p.y, -(4 + 600 * dt / 1000));    // fall
+        int gy = groundH(p.x, p.z, p.y);
+        if (gy < p.y - 4) p.y += Math.max(gy - p.y, -(4 + 600 * dt / 1000));
         else p.y = gy;
     }
 
-    void doPunch(int dmgBase) {
+    /** pistol: locks on to the nearest ped in front (VC auto-aim), flash + sound, scares the street */
+    void shoot() {
+        if (shotCd > 0) return;
+        if (ammo <= 0) { weapon = 0; say("Out of ammo"); return; }
+        shotCd = 380; ammo--;
+        Ped p = player, best = null; int bd = 36000;
+        int fx = Fx.sin(p.yaw), fz = Fx.cos(p.yaw);
+        for (int i = 0; i < nped; i++) {
+            Ped o = peds[i];
+            if (o.state == Ped.DEAD || o.seat != null) continue;
+            int dx = o.x - p.x, dz = o.z - p.z, d = Fx.dist(dx, dz);
+            if (d > bd || d < 1) continue;
+            if ((dx * fx + dz * fz) / 16384 < d * 75 / 100) continue;
+            bd = d; best = o;
+        }
+        Snd.play(Snd.GUN);
+        flashT = 70;
+        if (best != null) {
+            p.yaw = Fx.yawOf(best.x - p.x, best.z - p.z);
+            damagePed(best, 26 + Fx.rnd(10), true, p.x, p.z);
+        }
+        for (int i = 0; i < nped; i++) {
+            Ped o = peds[i];
+            if (o.cop || o.seat != null || o.state == Ped.DEAD || o.state == Ped.JACKED || o.angry) continue;
+            if (Fx.dist(o.x - p.x, o.z - p.z) < 30000 && o.clip < 0) { o.state = Ped.FLEE; o.timer = 5000; o.yaw = Fx.yawOf(o.x - p.x, o.z - p.z); }
+        }
+        if (copsNear(35 * 1024) > 0) raiseWanted(best != null && best.cop ? 2 : 1);
+    }
+
+    void doPunch(int dmgBase, int reach) {
         Ped p = player;
         int fx = Fx.sin(p.yaw), fz = Fx.cos(p.yaw);
         for (int i = 0; i < nped; i++) {
@@ -614,14 +782,15 @@ final class World {
             if (o.state == Ped.DEAD || o.seat != null || o.state == Ped.JACKED) continue;
             int dx = o.x - p.x, dz = o.z - p.z;
             int d = Fx.dist(dx, dz);
-            if (d > 1700 || d == 0) continue;
+            if (d > reach || d == 0) continue;
             if ((dx * fx + dz * fz) / 16384 < d * 5 / 10) continue;
+            Snd.play(weapon == 1 ? Snd.BAT : Snd.PUNCH);
             damagePed(o, dmgBase + Fx.rnd(14), true, p.x, p.z);
             int push = o.state == Ped.DEAD ? 0 : 250;
             rx = o.x + dx * push / d; rz = o.z + dz * push / d;
             resolve(280);
-            if (walkable(rx, rz)) { o.x = rx; o.z = rz; }
-            break;                                            // one victim per blow
+            if (walkable(rx, rz, o.y)) { o.x = rx; o.z = rz; }
+            break;
         }
     }
 
@@ -632,10 +801,10 @@ final class World {
         boolean front = ((ax - o.x) >> 4) * (Fx.sin(o.yaw) >> 4) + ((az - o.z) >> 4) * (Fx.cos(o.yaw) >> 4) > 0;
         boolean witnessed = byPlayer && copsNear(30 * 1024) > 0;
         if (o.hp <= 0) {
-            o.state = Ped.DEAD; o.timer = 14000; o.deadT = 0;
+            o.state = Ped.DEAD; o.timer = 14000; o.deadT = 0; o.angry = false; o.aimT = 0;
             int back = front ? -700 : 700;
             o.bloodX = o.x + ((Fx.sin(o.yaw) * back) >> 14); o.bloodZ = o.z + ((Fx.cos(o.yaw) * back) >> 14);
-            o.bloodY = groundH(o.bloodX, o.bloodZ);
+            o.bloodY = groundH(o.bloodX, o.bloodZ, o.y);
             startClip(o, front ? cKoF : cKoB, -2, 0);
             if (!o.cop) o.cash = 10 + Fx.rnd(90);
             if (byPlayer) {
@@ -647,7 +816,10 @@ final class World {
         } else {
             o.state = Ped.HIT;
             startClip(o, front ? cHitF : cHitB, -1, 0);
-            if (byPlayer) { if (o.cop) raiseWanted(1); else if (witnessed) raiseWanted(1); }
+            if (byPlayer) {
+                if (o.cop) raiseWanted(1); else if (witnessed) raiseWanted(1);
+                if (o.brave && !o.cop) o.angry = true;
+            }
         }
     }
 
@@ -659,6 +831,7 @@ final class World {
         shake = 250;
     }
 
+    // ------------------------------------------------------------------ vehicles
     void updateDriving(int dt, int keys) {
         Car c = inCar;
         int acc = 0, st = 0;
@@ -671,45 +844,70 @@ final class World {
         player.x = c.x; player.z = c.z; player.yaw = c.yaw; player.y = c.y;
     }
 
-    /** bicycle model with a smoothly moving steering angle and speed-sensitive lock */
+    /**
+     * Arcade car model with a real velocity vector: engine/brakes act along the heading, tyre grip removes
+     * sideways velocity (much less grip with the handbrake -> powerslides), yaw follows the bicycle model
+     * with a grip-limited response, slopes add gravity, and the body pitches/rolls from the accelerations.
+     */
     void driveCar(Car c, int dt, int acc, int st, boolean hand) {
-        CarModel cm = carModels[c.type];
-        int vmax = cm.vmax * 1024, ac = cm.accel * 1024 / 100, br = cm.brake * 1024 / 100;
-        int sp = c.speed;
+        CarModel m = cm(c);
+        int fx = Fx.sin(c.yaw), fz = Fx.cos(c.yaw);
+        int vF = (int) (((long) c.vx * fx + (long) c.vz * fz) >> 14);
+        int vR = (int) (((long) c.vx * fz - (long) c.vz * fx) >> 14);
+        int vmax = m.vmax * 1024, ac = m.accel * 1024 / 100, br = m.brake * 1024 / 100;
+        int a = 0;
         c.braking = false;
         if (acc > 0) {
-            if (sp < -200) { sp += br * dt / 1000; c.braking = true; }
-            else if (sp < vmax) sp += ac * dt / 1000 * (vmax - sp + vmax / 4) / vmax;
+            if (vF < -400) { a = br; c.braking = true; }
+            else if (vF < vmax) a = (int) ((long) ac * (vmax - vF + vmax / 5) / vmax);
         } else if (acc < 0) {
-            if (sp > 300) { sp -= br * dt / 1000; c.braking = true; }
-            else if (sp > -vmax / 4) sp -= ac * dt / 1000 / 2;
-        } else {
-            int drag = (400 + Fx.abs(sp) / 12) * dt / 1000 * 3;
-            if (sp > drag) sp -= drag; else if (sp < -drag) sp += drag; else sp = 0;
+            if (vF > 400) { a = -br; c.braking = true; }
+            else if (vF > -vmax / 3) a = -ac / 2;
         }
-        if (hand) { int bk = br * 12 / 10 * dt / 1000; if (sp > bk) sp -= bk; else if (sp < -bk) sp += bk; else sp = 0; }
-        // off-road drag (sand / grass)
+        int drag = 250 + Fx.abs(vF) / 10 + (int) ((long) vF * vF / 1800000);
+        if (acc == 0) drag += 800;
+        if (hand) drag += br / 2;
+        int stopA = (int) ((long) Fx.abs(vF) * 1000 / Math.max(dt, 1));
+        if (drag > stopA) drag = stopA;
+        a += vF > 0 ? -drag : (vF < 0 ? drag : 0);
+        int hf = groundH(c.x + ((fx * 1600) >> 14), c.z + ((fz * 1600) >> 14), c.y), hb = groundH(c.x - ((fx * 1600) >> 14), c.z - ((fz * 1600) >> 14), c.y);
+        int slope = (hf - hb) * 16 * 1024 / 3200;
+        if (Fx.abs(slope) < 700) a -= slope * 9800 / 1024;
+        else slope = 0;
         int s = surfAt(c.x, c.z);
-        if (s == S_SAND && Fx.abs(sp) > 5000) sp -= sp * dt / 1400;
-        c.speed = sp;
-        int asp = Fx.abs(sp);
-        int lock = cm.lockDeg * 1024 / 360;
-        int k = Math.min(asp, 40000) >> 6, kv = 14000 >> 6;
+        if ((s == S_SAND || s == S_GRASS) && vF > 6000) a -= vF / 6;
+        vF += a * dt / 1000;
+        if (acc == 0 && Fx.abs(vF) < 150) vF = 0;
+        int asp = Fx.abs(vF);
+        int lock = m.lockDeg * 1024 / 360;
+        int k = Math.min(asp, 45000) >> 6, kv = 15000 >> 6;
         int lockEff = lock * 256 / (256 + k * k * 256 / (kv * kv));
         int target = st * lockEff;
-        int diff = target - c.steer;
-        int rate = (st == 0 ? 820 : 420) * dt / 1000 + 1;
-        c.steer += Fx.clamp(diff, -rate, rate);
+        int rate = (st == 0 ? 900 : 480) * dt / 1000 + 1;
+        c.steer += Fx.clamp(target - c.steer, -rate, rate);
         int cs = Fx.cos(c.steer);
         int tan14 = (Fx.sin(c.steer) << 14) / (cs < 1000 ? 1000 : cs);
-        int omega = sp * tan14 / cm.wheelbase;
-        int yawRate = (omega * 163) >> 14;
-        if (hand && asp > 3000) yawRate = yawRate * 15 / 10;
-        c.yaw = (c.yaw + yawRate * dt / 1000) & 1023;
+        int want = (int) (((long) vF * tan14 / m.wheelbase * 163) >> 14);
+        if (hand && asp > 4000) want = want * 16 / 10;
+        int yawGrip = (hand ? 3 : 9) * m.grip / 100;
+        c.yawVel += (want - c.yawVel) * Math.min(1000, yawGrip * dt) / 1000;
+        c.yaw = (c.yaw + c.yawVel * dt / 1000) & 1023;
+        int grip = m.grip * (hand ? 3 : 12);
+        if (Fx.abs(vR) > 7000 && !hand) grip = grip * 2 / 3;
+        int dR = grip * dt;
+        if (vR > dR) vR -= dR; else if (vR < -dR) vR += dR; else vR = 0;
+        c.slide = Fx.abs(vR) > 2500 || (hand && asp > 6000);
+        fx = Fx.sin(c.yaw); fz = Fx.cos(c.yaw);
+        c.vx = (int) (((long) vF * fx + (long) vR * fz) >> 14);
+        c.vz = (int) (((long) vF * fz - (long) vR * fx) >> 14);
+        c.speed = vF;
+        int pitchT = -a / 900, rollT = (int) ((long) c.yawVel * vF / 260000);
+        c.pitch += (Fx.clamp(pitchT, -9, 9) - c.pitch) * Math.min(dt, 100) / 140;
+        c.roll += (Fx.clamp(rollT, -10, 10) - c.roll) * Math.min(dt, 100) / 140;
+        c.slopePitch += ((slope * 163 >> 10) - c.slopePitch) * Math.min(dt, 100) / 100;
         moveCar(c, dt);
     }
 
-    /** damage a car region: 0 front, 1 rear, 2 left, 3 right */
     void damageCar(Car c, int region, int amount) {
         if (amount <= 0) return;
         c.hp -= amount;
@@ -730,57 +928,75 @@ final class World {
             if (canFall && c.partDmg[p] > 700) c.lostBits |= 1 << p;
         }
         if (c.hp <= 0 && !c.wrecked) {
-            c.wrecked = true; c.color = 0x2A2622; c.color2 = 0x2A2622; c.speed = 0;
-            if (c == inCar) say("This vehicle is wrecked.");
+            c.wrecked = true; c.color = 0x2A2622; c.color2 = 0x2A2622; c.vx = c.vz = 0; c.speed = 0;
+            Snd.play(Snd.EXPLODE); shake = 500;
+            if (c == inCar) { hurt(60); say("This vehicle is wrecked."); }
+            else if (Fx.dist(c.x - player.x, c.z - player.z) < 6000) hurt(30);
         }
     }
 
     void moveCar(Car c, int dt) {
-        int dx = ((Fx.sin(c.yaw) * c.speed) >> 14) * dt / 1000, dz = ((Fx.cos(c.yaw) * c.speed) >> 14) * dt / 1000;
         int ox = c.x, oz = c.z;
-        c.x += dx; c.z += dz;
-        CarModel cm = carModels[c.type];
-        int half = cm.dimZ * 16 / 2 - 800, rad = cm.bike ? 380 : cm.dimX * 16 / 2 + 60;
+        c.x += c.vx * dt / 1000; c.z += c.vz * dt / 1000;
+        CarModel m = cm(c);
+        int half = m.bike ? 500 : m.dimZ * 16 / 2 - 900, rad = m.bike ? 380 : m.dimX * 16 / 2 + 60;
         if (half < 200) half = 200;
         boolean hit = false;
+        int nx = 0, nz = 0;
         for (int k = -1; k <= 1; k++) {
             int ox2 = (Fx.sin(c.yaw) * k * half) >> 14, oz2 = (Fx.cos(c.yaw) * k * half) >> 14;
             rx = c.x + ox2; rz = c.z + oz2;
-            if (resolve(rad)) { hit = true; c.x = rx - ox2; c.z = rz - oz2; }
-            int g = groundH(rx, rz);
-            if (g - c.y > 50 && g > -60) { hit = true; c.x = ox; c.z = oz; }      // kerb wall / sea wall
+            int bx = rx, bz = rz;
+            if (resolve(rad)) { hit = true; nx += rx - bx; nz += rz - bz; c.x = rx - ox2; c.z = rz - oz2; }
+            int g = groundH(c.x + ox2, c.z + oz2, c.y);
+            if (g - c.y > 45 && g > -60) { hit = true; nx += ox - c.x; nz += oz - c.z; c.x = ox; c.z = oz; }
         }
         if (hit) {
-            int asp = Fx.abs(c.speed);
-            if (asp > 3000) {
-                if (c.mode == Car.PLAYER) { shake = 300; hurt(asp / 5000); }
-                damageCar(c, c.speed > 0 ? 0 : 1, asp / 40);
+            int nl = Fx.dist(nx, nz);
+            int vn;
+            if (nl > 0) {
+                vn = (int) (((long) c.vx * nx + (long) c.vz * nz) / nl);
+                if (vn < 0) { c.vx -= (int) ((long) vn * nx * 13 / 10 / nl); c.vz -= (int) ((long) vn * nz * 13 / 10 / nl); }
+            } else { vn = -Fx.abs(c.speed); c.vx = -c.vx / 3; c.vz = -c.vz / 3; }
+            int imp = Fx.abs(vn);
+            if (imp > 3500) {
+                if (c.mode == Car.PLAYER) { shake = 300; hurt(imp / 6000); }
+                damageCar(c, c.speed > 0 ? 0 : 1, imp / 45);
+                if (Fx.dist(c.x - player.x, c.z - player.z) < 40000) Snd.play(Snd.CRASH);
             }
-            c.speed = c.speed / 4 * -1 / 2;
+            c.vx = c.vx * 85 / 100; c.vz = c.vz * 85 / 100;
         }
         for (int i = 0; i < ncars; i++) {
             Car o = cars[i];
             if (o == c) continue;
             int ddx = o.x - c.x, ddz = o.z - c.z;
-            if (ddx > 6500 || ddx < -6500 || ddz > 6500 || ddz < -6500) continue;
+            if (ddx > 7000 || ddx < -7000 || ddz > 7000 || ddz < -7000) continue;
+            CarModel om = cm(o);
+            int rr = (m.bike ? 900 : 1500) + (om.bike ? 900 : 1500);
             int d = Fx.dist(ddx, ddz);
-            if (d < 2500 && d > 0) {
-                int push = (2500 - d) / 2;
+            if (d < rr && d > 0) {
+                int push = (rr - d) / 2;
                 o.x += ddx * push / d; o.z += ddz * push / d;
                 c.x -= ddx * push / d; c.z -= ddz * push / d;
-                int rel = Fx.abs(c.speed - o.speed);
-                if (rel > 3000) {
-                    if (c.mode == Car.PLAYER || o.mode == Car.PLAYER) shake = 250;
-                    damageCar(c, regionOf(c, o.x, o.z), rel / 50);
-                    damageCar(o, regionOf(o, c.x, c.z), rel / 50);
-                    if ((o.mode == Car.POLICE || o.driver != null && o.driver.cop) && c.mode == Car.PLAYER) raiseWanted(1);
+                int rvx = c.vx - o.vx, rvz = c.vz - o.vz;
+                int vn = (int) (((long) rvx * ddx + (long) rvz * ddz) / d);
+                if (vn > 0) {
+                    int mc = m.mass, mo = om.mass;
+                    int jc = (int) ((long) vn * mo * 16 / 10 / (mc + mo)), jo = (int) ((long) vn * mc * 16 / 10 / (mc + mo));
+                    c.vx -= jc * ddx / d; c.vz -= jc * ddz / d;
+                    o.vx += jo * ddx / d; o.vz += jo * ddz / d;
+                    if (vn > 3000) {
+                        if (c.mode == Car.PLAYER || o.mode == Car.PLAYER) { shake = 250; Snd.play(Snd.CRASH); }
+                        damageCar(c, regionOf(c, o.x, o.z), vn / 60);
+                        damageCar(o, regionOf(o, c.x, c.z), vn / 60);
+                        if ((o.mode == Car.POLICE || (o.driver != null && o.driver.cop)) && c.mode == Car.PLAYER) raiseWanted(1);
+                    }
                 }
-                o.speed = (o.speed + c.speed) / 2;
-                c.speed = c.speed * 6 / 10;
             }
         }
-        int g = groundH(c.x, c.z);
-        c.y += (g - c.y) * Math.min(dt, 100) / 90;
+        int g = groundH(c.x, c.z, c.y);
+        if (g < c.y - 8) { c.vy -= 9800 * 64 / 1024 * dt / 1000; c.y += c.vy * dt / 1000; if (c.y < g) { c.y = g; c.vy = 0; } }
+        else { c.y += (g - c.y) * Math.min(dt, 100) / 60; c.vy = 0; }
         c.wheelRot = (c.wheelRot + c.speed * dt / 1000 * 1024 / 2200) & 1023;
         if (Fx.abs(c.speed) > 2500) {
             for (int i = 0; i < nped; i++) {
@@ -788,15 +1004,15 @@ final class World {
                 if (p.state == Ped.DEAD || p.seat != null || p.state == Ped.JACKED) continue;
                 int ddx = p.x - c.x, ddz = p.z - c.z;
                 if (ddx > 2800 || ddx < -2800 || ddz > 2800 || ddz < -2800) continue;
-                if (Fx.dist(ddx, ddz) < (cm.bike ? 1300 : 2000)) {
+                if (Fx.dist(ddx, ddz) < (m.bike ? 1300 : 2000)) {
                     damagePed(p, Fx.abs(c.speed) / 140, c.mode == Car.PLAYER, c.x, c.z);
                     p.x += ((Fx.sin(c.yaw) * 1500) >> 14); p.z += ((Fx.cos(c.yaw) * 1500) >> 14);
-                    if (c.mode == Car.PLAYER) shake = 150;
+                    if (c.mode == Car.PLAYER) { shake = 150; Snd.play(Snd.HITPED); }
                 }
             }
             if (c.mode != Car.PLAYER && inCar == null && pAct == 0) {
                 int ddx = player.x - c.x, ddz = player.z - c.z;
-                if (Fx.dist(ddx, ddz) < 1900) { hurt(Fx.abs(c.speed) / 1024 * 3); c.speed = c.speed / 3; }
+                if (Fx.dist(ddx, ddz) < 1900) { hurt(Fx.abs(c.speed) / 1024 * 3); c.vx /= 3; c.vz /= 3; }
             }
         }
     }
@@ -813,22 +1029,16 @@ final class World {
             Car c = cars[i];
             if (c.mode == Car.TRAFFIC) trafficAI(c, dt);
             else if (c.mode == Car.POLICE) policeAI(c, dt);
-            else if (c.mode == Car.PARKED && c.speed != 0) {
-                int drag = 9 * 1024 * dt / 1000;
-                if (c.speed > drag) c.speed -= drag; else if (c.speed < -drag) c.speed += drag; else c.speed = 0;
-                c.steer = c.steer * 3 / 4;
-                moveCar(c, dt);
-            }
+            else if (c.mode == Car.PARKED && (c.vx != 0 || c.vz != 0)) driveCar(c, dt, 0, 0, true);
         }
-        // recycle far traffic
         int traffic = 0;
         for (int i = ncars - 1; i >= 0; i--) {
             Car c = cars[i];
-            if (c.mode != Car.TRAFFIC && c.mode != Car.POLICE) continue;
-            if (Fx.dist(c.x - player.x, c.z - player.z) > 140 * 1024) { removeCar(i); continue; }
+            int d = Fx.dist(c.x - player.x, c.z - player.z);
+            if (c != inCar && c != pActCar && d > 150 * 1024) { removeCar(i); continue; }
             if (c.mode == Car.TRAFFIC) traffic++;
         }
-        if (traffic < 3 && (time % 1500) < dt) spawnTraffic(false);
+        if (traffic < 8 && (time % 1200) < dt) spawnTraffic(false);
         for (int i = 0; i < nped; i++) updatePed(peds[i], dt);
         int alive = 0;
         for (int i = 0; i < nped; i++) {
@@ -836,22 +1046,21 @@ final class World {
             if (p.seat != null) continue;
             int d = Fx.dist(p.x - player.x, p.z - player.z);
             if (p.cop) {
-                if ((wanted == 0 && d > 50000) || d > 120000) { if (p.state != Ped.DEAD) { p.state = Ped.DEAD; p.timer = 0; p.deadT = -1; } p.cop = p.state != Ped.DEAD; }
+                if ((wanted == 0 && d > 50000) || d > 120000) { p.state = Ped.DEAD; p.timer = 0; p.deadT = -1; p.cop = false; }
                 continue;
             }
-            if (p.state != Ped.DEAD && p.state != Ped.JACKED && p.state != Ped.GETUP && d > 110000) { p.state = Ped.DEAD; p.timer = 0; p.deadT = -1; }
+            if (p.state != Ped.DEAD && p.state != Ped.JACKED && p.state != Ped.GETUP && d > 100000) { p.state = Ped.DEAD; p.timer = 0; p.deadT = -1; }
             if (p.state != Ped.DEAD) alive++;
         }
-        if (alive < 14 && (time % 700) < dt) spawnPed(false);
+        if (alive < 22 && (time % 500) < dt) spawnPed(false);
     }
 
     /** right-hand lane follower on the road mask */
     void trafficAI(Car c, int dt) {
         if (c.driver == null || c.driver.seat != c) { c.mode = Car.PARKED; return; }
-        int fx = Fx.sin(c.yaw), fz = Fx.cos(c.yaw), rxv = fz, rzv = -fx;           // forward, right (2.14)
+        int fx = Fx.sin(c.yaw), fz = Fx.cos(c.yaw), rxv = fz, rzv = -fx;
         int look = 6000 + Fx.abs(c.speed) / 2;
         int ax = c.x + ((fx * (look >> 4)) >> 10), az = c.z + ((fz * (look >> 4)) >> 10);
-        // lateral position at the look-ahead point: distance to the right and left edge
         int eR = 0, eL = 0;
         for (int d = 1; d <= 12; d++) { if (surfAt(ax + rxv * d / 16, az + rzv * d / 16) != S_ROAD) break; eR = d; }
         for (int d = 1; d <= 12; d++) { if (surfAt(ax - rxv * d / 16, az - rzv * d / 16) != S_ROAD) break; eL = d; }
@@ -864,14 +1073,13 @@ final class World {
             int bestA = 0, bestScore = -1;
             for (int a = -192; a <= 192; a += 64) {
                 if (a == 0) continue;
-                int yy = (c.yaw + a) & 1023, sc = 0;
-                for (int s = 4; s <= 16; s += 4) if (surfAt(c.x + ((Fx.sin(yy) * s) >> 4), c.z + ((Fx.cos(yy) * s) >> 4)) == S_ROAD) sc++;
-                if (a > 0) sc = sc * 2 + 1; else sc *= 2;                     // prefer right turns
-                if (sc > bestScore) { bestScore = sc; bestA = a; }
+                int yy = (c.yaw + a) & 1023, sc2 = 0;
+                for (int s = 4; s <= 16; s += 4) if (surfAt(c.x + ((Fx.sin(yy) * s) >> 4), c.z + ((Fx.cos(yy) * s) >> 4)) == S_ROAD) sc2++;
+                if (a > 0) sc2 = sc2 * 2 + 1; else sc2 *= 2;
+                if (sc2 > bestScore) { bestScore = sc2; bestA = a; }
             }
             st = bestScore <= 1 ? 1 : (bestA > 0 ? 1 : -1);
         }
-        // obstacles
         boolean block = false;
         for (int i = 0; i < ncars && !block; i++) {
             Car o = cars[i];
@@ -892,10 +1100,11 @@ final class World {
                 if (fwd > 0 && fwd < look && lat < 1600 && lat > -1600) block = true;
             }
         }
-        int target = aheadRoad ? Math.min(vmaxOf(c), 10 * 1024) : 4 * 1024;
+        int target = aheadRoad ? Math.min(vmaxOf(c), 11 * 1024) : 4 * 1024;
         int acc = block ? -1 : (c.speed < target ? 1 : 0);
-        if (block && c.speed < 600) { acc = 0; c.speed = 0; c.blocked += dt; } else c.blocked = 0;
-        if (c.blocked > 6000) { c.blocked = 0; c.yaw = (c.yaw + 512) & 1023; }
+        if (block && c.speed < 600) { acc = 0; c.vx = c.vz = 0; c.speed = 0; c.blocked += dt; } else c.blocked = 0;
+        if (c.blocked > 2500 && (time % 4000) < dt) Snd.play3d(Snd.HORN, c.x, c.z, player.x, player.z);
+        if (c.blocked > 7000) { c.blocked = 0; c.yaw = (c.yaw + 512) & 1023; }
         driveCar(c, dt, acc, st, false);
     }
 
@@ -906,14 +1115,14 @@ final class World {
         int st = diff > 20 ? 1 : (diff < -20 ? -1 : 0);
         if (d < 10000 && inCar == null) {
             driveCar(c, dt, -1, 0, true);
-            if (Fx.abs(c.speed) < 800) {           // stop and let the cops out
+            if (Fx.abs(c.speed) < 800) {
                 Ped dr = c.driver; dr.seat = null; c.driver = null; c.mode = Car.PARKED;
-                dr.x = localX(c, -90, 0); dr.z = localZ(c, -90, 0); dr.state = Ped.WALK; dr.y = groundH(dr.x, dr.z); dr.hp = 160;
+                dr.x = localX(c, -90, 0); dr.z = localZ(c, -90, 0); dr.state = Ped.WALK; dr.y = groundH(dr.x, dr.z, c.y); dr.hp = 160;
                 spawnCopAt(localX(c, 90, 0), localZ(c, 90, 0));
             }
             return;
         }
-        driveCar(c, dt, Fx.abs(diff) > 300 && c.speed > 6000 ? 0 : 1, st, false);
+        driveCar(c, dt, Fx.abs(diff) > 300 && c.speed > 6000 ? 0 : 1, st, Fx.abs(diff) > 200 && c.speed > 8000);
     }
 
     void updatePed(Ped p, int dt) {
@@ -924,52 +1133,54 @@ final class World {
         }
         if (p.state == Ped.DEAD && p.deadT >= 0) p.deadT += dt;
         boolean finished = stepClip(p, dt);
-        if (p.clip >= 0) {                                        // one-shot clip playing: no walking
+        if (p.clip >= 0) {
             if (p.state == Ped.DEAD) { if (p.timer > 0) p.timer -= dt; }
-            if (p.cop && p.clip == cPunch && p.clipT > 200 && !p.hitDone) {    // the cop's punch connects mid-swing
+            if ((p.cop || p.angry) && (p.clip == cPunch || p.clip == cJab) && p.clipT > 200 && !p.hitDone) {
                 p.hitDone = true;
-                if (inCar == null && pAct == 0 && Fx.dist(player.x - p.x, player.z - p.z) < 1800) hurt(5 + Fx.rnd(4));
+                if (inCar == null && pAct == 0 && Fx.dist(player.x - p.x, player.z - p.z) < 1800) { hurt(5 + Fx.rnd(4)); Snd.play(Snd.PUNCH); }
             }
             return;
         }
         if (finished || p.state == Ped.HIT || p.state == Ped.JACKED || p.state == Ped.GETUP) {
             if (p.state == Ped.JACKED) { p.state = Ped.GETUP; startClip(p, cGetup, -1, 0); return; }
-            if (p.state == Ped.HIT || p.state == Ped.GETUP) { p.state = p.cop ? Ped.WALK : Ped.FLEE; p.timer = 3500; p.yaw = Fx.yawOf(p.x - player.x, p.z - player.z); }
+            if (p.state == Ped.HIT || p.state == Ped.GETUP) { p.state = (p.cop || p.angry) ? Ped.WALK : Ped.FLEE; p.timer = 4000; p.yaw = Fx.yawOf(p.x - player.x, p.z - player.z); }
         }
         if (p.state == Ped.DEAD) {
             if (p.timer > 0) p.timer -= dt;
-            if (p.cash > 0 && inCar == null && Fx.dist(p.x - player.x, p.z - player.z) < 1300) { money += p.cash; p.cash = 0; }
+            if (p.cash > 0 && inCar == null && Fx.dist(p.x - player.x, p.z - player.z) < 1300) { money += p.cash; p.cash = 0; Snd.play(Snd.PICKUP); }
             return;
         }
         int sp;
-        if (p.cop && wanted > 0 && health > 0 && !busted) {
-            int dx = player.x - p.x, dz = player.z - p.z;
-            int d = Fx.dist(dx, dz);
-            int want = Fx.yawOf(dx, dz);
+        int dxp = player.x - p.x, dzp = player.z - p.z, dpl = Fx.dist(dxp, dzp);
+        if ((p.cop && wanted > 0 && health > 0 && !busted) || (p.angry && health > 0)) {
+            int want = Fx.yawOf(dxp, dzp);
             p.yaw = (p.yaw + Fx.clamp(Fx.angDiff(p.yaw, want), -500 * dt / 1000, 500 * dt / 1000)) & 1023;
-            sp = d > 1500 ? (wanted == 1 ? 3600 : 4600) : 0;
+            sp = dpl > 1500 ? (p.cop && wanted == 1 ? 3600 : 4600) : 0;
             if (p.attackCd > 0) p.attackCd -= dt;
-            if (wanted == 1) {
-                // one star: they want to arrest you, not beat you up
-                if (d < 1500 && inCar == null && pAct == 0) {
+            if (p.angry && dpl > 30000) p.angry = false;
+            if (p.cop && wanted == 1) {
+                if (dpl < 1500 && inCar == null && pAct == 0) {
                     p.closeT += dt;
                     if (p.closeT > 2200) { busted = true; bustedT = 0; p.closeT = 0; }
                 } else p.closeT = 0;
-                if (player.clip == cPunch || player.clip == cJab || player.clip == cKick) {
-                    if (d < 1700 && p.attackCd <= 0) { startClip(p, cPunch, -1, 0); p.attackCd = 2200; }
-                }
-            } else if (d <= 1600 && p.attackCd <= 0 && inCar == null) { startClip(p, cPunch, -1, 0); p.attackCd = 1800 + Fx.rnd(700); }
+                if ((player.clip == cPunch || player.clip == cJab || player.clip == cHeavy || aimT > 0) && dpl < 1700 && p.attackCd <= 0) { startClip(p, cPunch, -1, 0); p.attackCd = 2200; }
+            } else if (p.cop && wanted >= 2 && dpl < 16000 && dpl > 2500 && p.attackCd <= 0 && inCar == null) {
+                p.attackCd = 1600 + Fx.rnd(1200); p.aimT = 600; sp = 0;           // 2+ stars: cops shoot
+                Snd.play3d(Snd.GUN, p.x, p.z, player.x, player.z);
+                if (Fx.rnd(100) < 55) hurt(4 + Fx.rnd(4));
+            } else if (dpl <= 1600 && p.attackCd <= 0 && inCar == null) { startClip(p, Fx.rnd(2) == 0 ? cPunch : cJab, -1, 0); p.attackCd = 1600 + Fx.rnd(900); }
+            if (p.aimT > 0) { p.aimT -= dt; sp = 0; }
             p.speed = sp;
         } else {
-            if (p.state == Ped.FLEE) { p.timer -= dt; sp = 4200; if (p.timer <= 0) p.state = Ped.WALK; }
+            if (p.state == Ped.FLEE) { p.timer -= dt; sp = 5200; if (p.timer <= 0) p.state = Ped.WALK; }
             else {
                 p.turnTimer -= dt;
                 sp = p.cop ? 1300 : p.speed;
                 if (p.state == Ped.IDLE) { sp = 0; if (p.turnTimer <= 0) { p.state = Ped.WALK; p.turnTimer = 2500; } }
                 else if (p.turnTimer <= 0) {
-                    p.targetYaw = (p.yaw + Fx.rnd(300) - 150) & 1023;
-                    p.turnTimer = 2500 + Fx.rnd(5000);
-                    if (Fx.rnd(5) == 0) { p.state = Ped.IDLE; p.turnTimer = 1500 + Fx.rnd(2500); }
+                    p.targetYaw = (p.yaw + Fx.rnd(160) - 80) & 1023;
+                    p.turnTimer = 3000 + Fx.rnd(6000);
+                    if (Fx.rnd(6) == 0) { p.state = Ped.IDLE; p.turnTimer = 1500 + Fx.rnd(2500); }
                 }
                 p.yaw = (p.yaw + Fx.clamp(Fx.angDiff(p.yaw, p.targetYaw), -300 * dt / 1000, 300 * dt / 1000)) & 1023;
             }
@@ -981,21 +1192,25 @@ final class World {
                 if (p.state != Ped.FLEE && Fx.dist(dx, dz) < 4000) { p.state = Ped.FLEE; p.timer = 2200; p.yaw = Fx.yawOf(dx, dz); }
             }
         }
-        // look ahead: keep off water, solid cells and (when walking calmly) the road
+        // look ahead: stay off water and walls, follow the pavement (rarely cross the road)
         int ax = p.x + ((Fx.sin(p.yaw) * 1500) >> 14), az = p.z + ((Fx.cos(p.yaw) * 1500) >> 14);
-        boolean calm = p.state == Ped.WALK && !p.cop;
-        if (sp > 0 && (!walkable(ax, az) || (calm && surfAt(ax, az) == S_ROAD && surfAt(p.x, p.z) != S_ROAD))) {
-            p.targetYaw = (p.yaw + 384 + Fx.rnd(256)) & 1023; p.yaw = (p.yaw + 60) & 1023;
-            if (!p.cop || wanted == 0) sp = 0;
+        boolean calm = p.state == Ped.WALK && !p.cop && !p.angry;
+        if (sp > 0 && (!walkable(ax, az, p.y) || (calm && surfAt(ax, az) == S_ROAD && surfAt(p.x, p.z) != S_ROAD && Fx.rnd(40) != 0))) {
+            int l = (p.yaw - 256) & 1023, rr = (p.yaw + 256) & 1023;
+            boolean okL = walkable(p.x + ((Fx.sin(l) * 1500) >> 14), p.z + ((Fx.cos(l) * 1500) >> 14), p.y);
+            boolean okR = walkable(p.x + ((Fx.sin(rr) * 1500) >> 14), p.z + ((Fx.cos(rr) * 1500) >> 14), p.y);
+            p.targetYaw = okR && (!okL || Fx.rnd(2) == 0) ? rr : (okL ? l : (p.yaw + 512) & 1023);
+            p.yaw = (p.yaw + Fx.clamp(Fx.angDiff(p.yaw, p.targetYaw), -90, 90)) & 1023;
+            if (!p.cop && !p.angry) sp = sp / 3;
         }
         rx = p.x + ((Fx.sin(p.yaw) * sp) >> 14) * dt / 1000;
         rz = p.z + ((Fx.cos(p.yaw) * sp) >> 14) * dt / 1000;
         resolve(280);
         stepOk(p.x, p.z, p.y, 60);
-        if (deep(rx, rz)) { rx = p.x; rz = p.z; }
+        if (deep(rx, rz, p.y)) { rx = p.x; rz = p.z; }
         p.x = rx; p.z = rz;
         selectLoco(p, dt, sp);
-        p.y = groundH(p.x, p.z);
+        p.y = groundH(p.x, p.z, p.y);
     }
 
     // ------------------------------------------------------------------ camera
@@ -1013,14 +1228,19 @@ final class World {
         if ((keys & K_CAMU) != 0) { camPitch += 80 * dt / 1000 + 1; camIdle = 0; }
         if ((keys & K_CAMD) != 0) { camPitch -= 80 * dt / 1000 + 1; camIdle = 0; }
         camPitch = Fx.clamp(camPitch, 4, 150);
-        int hy = inCar != null ? (inCar.speed < -1500 ? (inCar.yaw + 512) & 1023 : inCar.yaw) : player.yaw;
+        int hy;
+        if (inCar != null) {
+            int spd = Fx.dist(inCar.vx, inCar.vz);
+            hy = spd > 2500 ? Fx.yawOf(inCar.vx, inCar.vz) : inCar.yaw;           // follow the direction of travel
+            if (inCar.speed < -1500) hy = (inCar.yaw + 512) & 1023;
+        } else hy = player.yaw;
         int want = (hy + camYawOff) & 1023;
         int df = Fx.angDiff(camYaw, want);
-        int rate = inCar != null ? 4 : 7;
+        int rate = inCar != null ? 3 : 7;
         camYaw = (camYaw + df * rate * dt / 1000 + (df > 0 ? 1 : (df < 0 ? -1 : 0))) & 1023;
         if (Fx.abs(Fx.angDiff(camYaw, want)) < 2) camYaw = want;
         int tx = player.x, tz = player.z, ty = player.y + 100;
-        int dist = inCar != null ? (carModels[inCar.type].bike ? 5200 : 7200) : camDistMm;
+        int dist = inCar != null ? (cm(inCar).bike ? 5200 : 6800 + Fx.abs(inCar.speed) / 25) : camDistMm;
         int cp = Fx.cos(camPitch), sp = Fx.sin(camPitch);
         int hd = (dist * cp) >> 14, vd = (dist * sp) >> 14;
         int bestD = 120;
@@ -1028,15 +1248,14 @@ final class World {
             int f = s * 1000 / 8;
             int cx = tx - ((Fx.sin(camYaw) * (hd * f / 1000)) >> 14), cz = tz - ((Fx.cos(camYaw) * (hd * f / 1000)) >> 14);
             int cyy = ty + (vd * f / 1000 >> 4);
-            if (cyy > groundH(cx, cz) + 20 && !solidCell((cx - sx0) / scell, (cz - sz0) / scell)) { bestD = f; break; }
+            if (cyy > groundH(cx, cz, cyy) + 20) { bestD = f; break; }
         }
         int hdf = hd * bestD / 1000, vdf = vd * bestD / 1000;
         camXm = tx - ((Fx.sin(camYaw) * hdf) >> 14);
         camZm = tz - ((Fx.cos(camYaw) * hdf) >> 14);
         camYm = ty + (vdf >> 4);
-        int g = groundH(camXm, camZm);
+        int g = groundH(camXm, camZm, camYm);
         if (camYm < g + 24) camYm = g + 24;
-        if (camYm < 24) camYm = 24;
     }
 
     // ================================================================== rendering
@@ -1046,7 +1265,6 @@ final class World {
         d.readFully(tc);
         d.close();
     }
-
     String clockStr() {
         int h = minutes / 60, m = minutes % 60;
         return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
@@ -1064,7 +1282,7 @@ final class World {
         r.skyTop = (lv[0] << 16) | (lv[1] << 8) | lv[2];
         r.skyBot = (lv[3] << 16) | (lv[4] << 8) | lv[5];
         r.fogR = lv[3]; r.fogG = lv[4]; r.fogB = lv[5];
-        r.groundCol = Sky.mix(r.skyBot, 0x5C5A50, 150);   // seams between map pieces show this instead of bright sky
+        r.groundCol = Sky.mix(r.skyBot, 0x5C5A50, 150);
         int ambObj = (lv[9] + lv[10] + lv[11]) / 3, dir = (lv[12] + lv[13] + lv[14]) / 3;
         int fb = 200 + brightness * 4;
         int a = (ambObj * 256 / 255 + 28) * fb >> 8, d = (dir * 140 / 255) * fb >> 8;
@@ -1075,7 +1293,7 @@ final class World {
         if (Sky.sunY > 1500) { r.lx = Sky.sunX; r.ly = Sky.sunY; r.lz = Sky.sunZ; }
         else { r.lx = 5000; r.ly = 12000; r.lz = -6000; }
         r.farZ = drawDist * 64;
-        r.fogFar = r.farZ; r.fogNear = r.farZ * 28 / 100;
+        r.fogFar = r.farZ; r.fogNear = r.farZ * 35 / 100;
     }
 
     private final int[] rYaw = new int[9], mmA = new int[9], wA = new int[9], wB = new int[9], wC = new int[9], sc = new int[9];
@@ -1089,15 +1307,18 @@ final class World {
         r.clear();
         Sky.drawSky(this, r);
         int[] mv = r.mv;
-        int lim = r.farZ + 3000;
+        int nearLim = 150 * 64 + 3200, lim = r.farZ + 3300;
         int fx = Fx.sin(camYaw), fz = Fx.cos(camYaw);
-        for (int i = 0; i < nchunk; i++) {
-            int dx = chunkX[i] - r.camX, dz = chunkZ[i] - r.camZ;
+        for (int k = 0; k < tiles.length; k++) {
+            Tile t = tiles[k];
+            if (t == null || !t.installed) continue;
+            int dx = t.cx - r.camX, dz = t.cz - r.camZ;
             if (dx > lim || dx < -lim || dz > lim || dz < -lim) continue;
-            if (((dx * fx + dz * fz) >> 14) < -3000) continue;          // behind the camera
+            if (((dx * fx + dz * fz) >> 14) < -4600) continue;
             int dy = -r.camY;
             int tx = (mv[0] * dx + mv[1] * dy + mv[2] * dz) >> 14, ty = (mv[3] * dx + mv[4] * dy + mv[5] * dz) >> 14, tz = (mv[6] * dx + mv[7] * dy + mv[8] * dz) >> 14;
-            r.drawMesh(chunk[i], mv, tx, ty, tz, r.lx, r.ly, r.lz, 0);
+            boolean near = Math.max(Fx.abs(dx), Fx.abs(dz)) < nearLim;
+            r.drawMesh(near ? t.near : t.far, mv, tx, ty, tz, r.lx, r.ly, r.lz, 0);
         }
         for (int i = 0; i < nped; i++) drawBlood(peds[i]);
         for (int i = 0; i < ncars; i++) drawCar(cars[i], false);
@@ -1108,9 +1329,25 @@ final class World {
             drawPed(p);
         }
         drawPed(player);
+        drawPickups();
         for (int i = 0; i < ncars; i++) drawCar(cars[i], true);
         if (night) drawBeam();
         Sky.drawPost(this, r);
+    }
+
+    void drawPickups() {
+        for (int i = 0; i < npick; i++) {
+            if (pkT[i] > 0) continue;
+            Mesh m = weaponMesh[pkType[i]];
+            if (m == null) continue;
+            int dx = (pkX[i] >> 4) - r.camX, dy = pkY[i] + 40 + ((Fx.sin(time / 3) * 6) >> 14) - r.camY, dz = (pkZ[i] >> 4) - r.camZ;
+            if (dx > 6000 || dx < -6000 || dz > 6000 || dz < -6000) continue;
+            Fx.rotY(rYaw, time / 4);
+            Fx.mul(r.mv, rYaw, mmA);
+            int[] mv = r.mv;
+            int tx = (mv[0] * dx + mv[1] * dy + mv[2] * dz) >> 14, ty = (mv[3] * dx + mv[4] * dy + mv[5] * dz) >> 14, tz = (mv[6] * dx + mv[7] * dy + mv[8] * dz) >> 14;
+            r.drawMesh(m, mmA, tx, ty, tz, 0, 16384, 0, 0);
+        }
     }
 
     void drawBlood(Ped p) {
@@ -1118,7 +1355,7 @@ final class World {
         int dx = (p.bloodX >> 4) - r.camX, dz = (p.bloodZ >> 4) - r.camZ, dy = p.bloodY + 2 - r.camY;
         if (dx > 4000 || dx < -4000 || dz > 4000 || dz < -4000) return;
         int grow = p.deadT - 400; if (grow > 3000) grow = 3000;
-        int s = 4000 + grow * 9 / 2;                     // scale 2.14: 0.25 .. 1.07 (pool up to ~2 m)
+        int s = 4000 + grow * 9 / 2;
         Fx.rotY(rYaw, p.yaw);
         for (int k = 0; k < 9; k++) sc[k] = 0;
         sc[0] = s; sc[4] = 16384; sc[8] = s;
@@ -1131,20 +1368,17 @@ final class World {
 
     void drawBeam() {
         int dx = (lampX >> 4) - r.camX, dy = lampY - r.camY, dz = (lampZ >> 4) - r.camZ;
-        if (dx > 48000 || dx < -48000 || dz > 48000 || dz < -48000) return;
-        Fx.rotY(rYaw, (time / 8) & 1023);                 // one turn every ~8 s
+        if (lampY < -50 || dx > 48000 || dx < -48000 || dz > 48000 || dz < -48000) return;
+        Fx.rotY(rYaw, (time / 8) & 1023);
         Fx.mul(r.mv, rYaw, mmA);
         int[] mv = r.mv;
         int tx = (mv[0] * dx + mv[1] * dy + mv[2] * dz) >> 14, ty = (mv[3] * dx + mv[4] * dy + mv[5] * dz) >> 14, tz = (mv[6] * dx + mv[7] * dy + mv[8] * dz) >> 14;
-        int fn = r.fogNear, ff = r.fogFar;
-        r.fogNear = 1 << 28; r.fogFar = (1 << 28) + 1;     // no fog tint on light
-        int fz0 = r.farZ;
-        r.farZ = 60000;
+        int fn = r.fogNear, ff = r.fogFar, fz0 = r.farZ;
+        r.fogNear = 1 << 28; r.fogFar = (1 << 28) + 1; r.farZ = 60000;
         r.additive = true;
         r.drawMesh(beam, mmA, tx, ty, tz, 0, 16384, 0, 0);
         r.additive = false;
-        r.farZ = fz0;
-        r.fogNear = fn; r.fogFar = ff;
+        r.farZ = fz0; r.fogNear = fn; r.fogFar = ff;
     }
 
     void drawCar(Car c, boolean glassPass) {
@@ -1154,12 +1388,12 @@ final class World {
         int dist = Math.max(Fx.abs(dx), Fx.abs(dz));
         boolean near = dist < 1500;
         int[] mv = r.mv;
-        int cs = Fx.cos(c.yaw), sn = Fx.sin(c.yaw);
-        rYaw[0] = cs; rYaw[1] = 0; rYaw[2] = sn; rYaw[3] = 0; rYaw[4] = 16384; rYaw[5] = 0; rYaw[6] = -sn; rYaw[7] = 0; rYaw[8] = cs;
+        CarModel m = cm(c);
+        int roll = m.bike ? -c.roll * 3 : c.roll, pitch = c.pitch - c.slopePitch;
+        Fx.rotY(wA, c.yaw); Fx.rotX(wB, pitch); Fx.mul(wA, wB, wC); Fx.rotZ(wA, roll); Fx.mul(wC, wA, rYaw);
         Fx.mul(mv, rYaw, mmA);
         int tx = (mv[0] * dx + mv[1] * dy + mv[2] * dz) >> 14, ty = (mv[3] * dx + mv[4] * dy + mv[5] * dz) >> 14, tz = (mv[6] * dx + mv[7] * dy + mv[8] * dz) >> 14;
-        int lmx = (cs * r.lx - sn * r.lz) >> 14, lmy = r.ly, lmz = (sn * r.lx + cs * r.lz) >> 14;
-        CarModel m = carModels[c.type];
+        int lmx = (rYaw[0] * r.lx + rYaw[3] * r.ly + rYaw[6] * r.lz) >> 14, lmy = (rYaw[1] * r.lx + rYaw[4] * r.ly + rYaw[7] * r.lz) >> 14, lmz = (rYaw[2] * r.lx + rYaw[5] * r.ly + rYaw[8] * r.lz) >> 14;
         r.tint2 = c.color2;
         if (!near) {
             if (glassPass) { if (m.farGlass != null && dist < 2600) { r.blend = true; r.drawMesh(m.farGlass, mmA, tx, ty, tz, lmx, lmy, lmz, 0); r.blend = false; } }
@@ -1168,20 +1402,19 @@ final class World {
         }
         for (int p = 0; p < m.np; p++) {
             int id = m.partId[p];
-            if ((c.lostBits & (1 << id)) != 0) continue;
-            Mesh[] v = (c.damBits & (1 << id)) != 0 ? m.dam[p] : m.ok[p];
-            if (glassPass) {
-                if (v[1] != null) { r.blend = true; r.drawMesh(v[1], mmA, tx, ty, tz, lmx, lmy, lmz, 0); r.blend = false; }
-            } else r.drawMesh(v[0], mmA, tx, ty, tz, lmx, lmy, lmz, c.color);
+            if (id < 12 && (c.lostBits & (1 << id)) != 0) continue;
+            Mesh[] v = id < 12 && (c.damBits & (1 << id)) != 0 ? m.dam[p] : m.ok[p];
+            if (glassPass) { if (v[1] != null) { r.blend = true; r.drawMesh(v[1], mmA, tx, ty, tz, lmx, lmy, lmz, 0); r.blend = false; } }
+            else r.drawMesh(v[0], mmA, tx, ty, tz, lmx, lmy, lmz, c.color);
         }
         if (glassPass || m.bike) return;
+        int cs = Fx.cos(c.yaw), sn = Fx.sin(c.yaw);
         for (int k = 0; k < m.nw; k++) {
             int wxl = m.wx[k], wzl = m.wz[k];
             int wpx = px + ((cs * wxl + sn * wzl) >> 14), wpz = pz + ((-sn * wxl + cs * wzl) >> 14), wpy = c.y + m.wy[k];
-            Fx.rotY(wA, wzl > 0 ? c.steer : 0);
-            Fx.mul(rYaw, wA, wB);
-            Fx.rotX(wA, c.wheelRot);
-            Fx.mul(wB, wA, wC);
+            Fx.rotY(wA, c.yaw + (wzl > 0 ? c.steer : 0));
+            Fx.rotX(wB, c.wheelRot);
+            Fx.mul(wA, wB, wC);
             if (wxl < 0) { Fx.rotY(wA, 512); Fx.mul(wC, wA, wB); System.arraycopy(wB, 0, wC, 0, 9); }
             int ex = wpx - r.camX, ey = wpy - r.camY, ez = wpz - r.camZ;
             int wtx = (mv[0] * ex + mv[1] * ey + mv[2] * ez) >> 14, wty = (mv[3] * ex + mv[4] * ey + mv[5] * ez) >> 14, wtz = (mv[6] * ex + mv[7] * ey + mv[8] * ez) >> 14;
@@ -1191,16 +1424,37 @@ final class World {
         }
     }
 
+    static final int[] AIM = new int[9];
+    private final int[] handW = new int[3];
+
     void drawPed(Ped p) {
         int clip, t, fx = p.x >> 4, fz = p.z >> 4, fy = p.y;
-        if (p.seat != null) { clip = cSit; t = 0; fy = p.seat.y - 18; if (carModels[p.seat.type].bike) fy = p.seat.y + 10; }
+        if (p.seat != null) { clip = cSit; t = 0; fy = p.seat.y - 18; if (cm(p.seat).bike) fy = p.seat.y + 10; }
         else if (p.clip >= 0) { clip = p.clip; t = p.clipT; }
         else { clip = p.loco; t = p.locoT; }
         if (clip < 0) clip = cIdle;
         int dx = fx - r.camX, dz = fz - r.camZ;
         if (dx > r.farZ || dx < -r.farZ || dz > r.farZ || dz < -r.farZ) return;
         AnimData.sample(clip, t, pose);
-        PedModel m = p == player ? pm0 : (Math.max(Fx.abs(dx), Fx.abs(dz)) < 1150 ? npc[p.kind] : npcLo[p.kind]);
-        m.drawPose(r, fx, fy, fz, p.yaw, pose, p.tex);
+        boolean aiming = p.seat == null && p.clip < 0 && ((p == player && weapon == 2 && aimT > 0) || (p != player && p.aimT > 0));
+        if (aiming) {
+            if (AIM[4] == 0) Fx.rotY(AIM, 768);
+            System.arraycopy(AIM, 0, pose, 9, 9); System.arraycopy(AIM, 0, pose, 18, 9);
+        }
+        PedModel m = p == player ? pm0 : (Math.max(Fx.abs(dx), Fx.abs(dz)) < 1150 ? pool[p.kind] : poolLo[p.kind]);
+        if (m == null) return;
+        m.drawPose(r, fx, fy, fz, p.yaw, pose, p == player ? playerTex : p.tex);
+        if (p == player && weapon > 0 && p.seat == null && weaponMesh[weapon] != null) drawHeld(m, weaponMesh[weapon]);
+        if (aiming && (p == player ? flashT > 0 : p.aimT > 450)) { m.hand(handW); Sky.flash(r, handW[0], handW[1], handW[2]); }
+    }
+
+    void drawHeld(PedModel m, Mesh w) {
+        m.hand(handW);
+        int[] R = m.rp[2];
+        int dx = handW[0] - r.camX, dy = handW[1] - r.camY, dz = handW[2] - r.camZ;
+        int[] mv = r.mv;
+        int tx = (mv[0] * dx + mv[1] * dy + mv[2] * dz) >> 14, ty = (mv[3] * dx + mv[4] * dy + mv[5] * dz) >> 14, tz = (mv[6] * dx + mv[7] * dy + mv[8] * dz) >> 14;
+        Fx.mul(mv, R, mmA);
+        r.drawMesh(w, mmA, tx, ty, tz, (R[0] * r.lx + R[3] * r.ly + R[6] * r.lz) >> 14, (R[1] * r.lx + R[4] * r.ly + R[7] * r.lz) >> 14, (R[2] * r.lx + R[5] * r.ly + R[8] * r.lz) >> 14, 0);
     }
 }

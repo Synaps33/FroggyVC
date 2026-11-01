@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       rebuild_assets:
-        description: "Re-run the asset converters (map, cars, sprites, fonts) before compiling"
+        description: "Re-run the sprite/font converter before compiling"
         type: boolean
         default: false
 
@@ -33,10 +33,6 @@ jobs:
         if: ${{ inputs.rebuild_assets || hashFiles('assets/fonts/hud.ttf', 'assets/fonts/hud.otf') != '' }}
         run: |
           pip install --quiet numpy pillow
-          if [ "${{ inputs.rebuild_assets }}" = "true" ]; then
-            python3 tools/map_export.py
-            python3 tools/car_export.py
-          fi
           python3 tools/fx_export.py
 
       - name: Compile + preverify (CLDC 1.1 / MIDP 2.0)
@@ -48,6 +44,8 @@ jobs:
           export MIDLET_VERSION="0.$((2 + N / 100)).$((N % 100))"
           echo "MIDLET_VERSION=$MIDLET_VERSION" >> $GITHUB_ENV
           python3 tools/package.py dist
+          # smaller build: Ocean Beach + Washington Beach only (rest of the map is sea)
+          MAP_REGION=16,2,25,20 JAR_NAME=GTA_VC_J2ME_lite python3 tools/package.py dist
           ls -la dist
 
       - uses: actions/upload-artifact@v4
@@ -62,8 +60,11 @@ jobs:
           name: GTA VC J2ME ${{ env.MIDLET_VERSION }} (build ${{ github.run_number }})
           body: |
             Automatic build of ${{ github.sha }}.
-            Install on the Nokia E72: copy GTA_VC_J2ME.jar (and .jad) to the phone and open it.
+            Install on the Nokia E72: copy the .jar (and .jad) to the phone and open it.
+            GTA_VC_J2ME.jar = whole map (big); GTA_VC_J2ME_lite.jar = Ocean Beach + Washington Beach only.
           files: |
             dist/GTA_VC_J2ME.jar
             dist/GTA_VC_J2ME.jad
+            dist/GTA_VC_J2ME_lite.jar
+            dist/GTA_VC_J2ME_lite.jad
           make_latest: true

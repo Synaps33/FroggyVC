@@ -184,6 +184,11 @@ final class Ui {
         int right = bw - 5 * u;
         // weapon / fist box
         sprite(b, bw, bh, hud, 128, 0, 20, 38, 30, right - 38 * u, 4 * u, u);
+        if (w.weapon > 0) {
+            fillA(b, bw, bh, right - 36 * u, 6 * u, 34 * u, 26 * u, 0x101018, 200);
+            textC(b, bw, bh, right - 19 * u, 8 * u, w.weapon == 1 ? "bat" : "colt", WHITE, u);
+            if (w.weapon == 2) textC(b, bw, bh, right - 19 * u, 19 * u, String.valueOf(w.ammo), BLUE, u);
+        }
         int tx = right - 42 * u;
         textR(b, bw, bh, tx, 3 * u, w.clockStr(), BLUE, u);
         String m = String.valueOf(w.money);

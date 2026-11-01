@@ -2,6 +2,7 @@ import java.io.IOException;
 
 /** Vice City sky: timecyc gradient, drifting clouds, sun + corona, moon, stars, lens flare and the lighthouse glow. */
 final class Sky {
+    static int[] flash; static int sFlash;
     static int[] cloud1, cloud2, cloud3, hilit, corona, star, moon, ringa, hex, circle, reflect, streek;
     static int sCloud, sCorona, sStar, sMoon, sRing, sHex, sCircle, sReflect, sStreek;
     static int sunX, sunY, sunZ;              // direction towards the sun, 2.14
@@ -24,6 +25,7 @@ final class Sky {
         circle = Assets.intensity("/fx_circle.png", dm); sCircle = dm[0];
         reflect = Assets.intensity("/fx_reflect.png", dm); sReflect = dm[0];
         streek = Assets.intensity("/fx_streek.png", dm); sStreek = dm[0];
+        flash = Assets.intensity("/fx_flash.png", dm); sFlash = dm[0];
         int seed = 1234567;
         for (int i = 0; i < NSTAR; i++) {
             seed = seed * 1103515245 + 12345; starA[i] = (seed >>> 8) & 1023;
@@ -88,6 +90,16 @@ final class Sky {
                 }
             }
         }
+    }
+
+    /** muzzle flash at a world point (1/64 m), drawn straight into the frame */
+    static void flash(R3D r, int x, int y, int z) {
+        int dx = x - r.camX, dy = y - r.camY, dz = z - r.camZ;
+        int[] m = r.mv;
+        int vx = (m[0] * dx + m[1] * dy + m[2] * dz) >> 14, vy = (m[3] * dx + m[4] * dy + m[5] * dz) >> 14, vz = (m[6] * dx + m[7] * dy + m[8] * dz) >> 14;
+        if (vz < 64) return;
+        int s = r.focal * 40 / vz + 4;
+        spr(r.fb, r.W, r.H, flash, sFlash, r.cx + vx * r.focal / vz, r.cy - vy * r.focal / vz, s, s, 0xFFD890, 0, 256);
     }
 
     static int mix(int a, int b, int t) {

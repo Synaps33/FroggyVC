@@ -10,9 +10,9 @@ final class R3D {
     int[] fb, zb;
 
     // textures (ARGB, 0 = transparent)
-    int[][] T = new int[256][];
-    int[] uvs = new int[256];     // UV right-shift (ped meshes are authored for 128px atlases)
-    int[] tws = new int[256], twm = new int[256], thm = new int[256], tpu = new int[256], tpv = new int[256];
+    int[][] T = new int[512][];
+    int[] uvs = new int[512];     // UV right-shift (ped meshes are authored for 128px atlases)
+    int[] tws = new int[512], twm = new int[512], thm = new int[512], tpu = new int[512], tpv = new int[512];
 
     // camera
     int camX, camY, camZ;

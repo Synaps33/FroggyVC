@@ -11,8 +11,17 @@ final class PedModel {
 
     // scratch
     private final int[] rYaw = new int[9], rt = new int[9], rb = new int[9], rtor = new int[9], rbase = new int[9];
-    private final int[][] rp = new int[9][9];
-    private final int[] px = new int[9], py = new int[9], pz = new int[9];
+    final int[][] rp = new int[9][9];
+    final int[] px = new int[9], py = new int[9], pz = new int[9];
+    int hx, hy, hz;              // fist point of the right forearm (part FORE_A), part-local
+
+    /** world position (1/64 m) of the right hand after the last drawPose */
+    void hand(int[] o) {
+        int[] R = rp[FORE_A];
+        o[0] = px[FORE_A] + ((R[0] * hx + R[1] * hy + R[2] * hz) >> 14);
+        o[1] = py[FORE_A] + ((R[3] * hx + R[4] * hy + R[5] * hz) >> 14);
+        o[2] = pz[FORE_A] + ((R[6] * hx + R[7] * hy + R[8] * hz) >> 14);
+    }
     private final int[] a = new int[9], b = new int[9], mm = new int[9], tmp = new int[9];
 
     static PedModel load(String res) throws IOException {
@@ -56,6 +65,12 @@ final class PedModel {
             m.part[p] = me;
         }
         in.close();
+        Mesh f = m.part[FORE_A];
+        long best = -1;
+        for (int i = 0; i < f.nv; i++) {
+            long dd = (long) f.x[i] * f.x[i] + (long) f.y[i] * f.y[i] + (long) f.z[i] * f.z[i];
+            if (dd > best) { best = dd; m.hx = f.x[i]; m.hy = f.y[i]; m.hz = f.z[i]; }
+        }
         return m;
     }
 

@@ -12,6 +12,9 @@ final class CarModel {
     int[] wx = new int[4], wy = new int[4], wz = new int[4], wr = new int[4];
     int nw, dimX, dimY, dimZ, seatX, seatY, seatZ;
     boolean bike;
+    String name;
+    int[] tex;
+    int mass, grip, cls;           // handling class: 0 car, 1 sports, 2 heavy, 3 bike, 4 slow
     // handling
     int vmax, accel, brake, lockDeg, wheelbase;
     static Mesh wheel;
@@ -20,7 +23,9 @@ final class CarModel {
         DataInputStream d = new DataInputStream(new ByteArrayInputStream(Assets.readAll("/car_" + name + ".bin")));
         byte[] mg = new byte[4]; d.readFully(mg);
         CarModel c = new CarModel();
+        c.name = name;
         int[] texId = readTex(d);
+        c.tex = texId;
         c.dimX = d.readShort(); c.dimY = d.readShort(); c.dimZ = d.readShort();
         c.seatX = d.readShort(); c.seatY = d.readShort(); c.seatZ = d.readShort();
         c.nw = d.readUnsignedByte();
@@ -51,10 +56,11 @@ final class CarModel {
         for (int i = 0; i < nt; i++) {
             byte[] b = new byte[d.readUnsignedByte()];
             d.readFully(b);
-            texId[i] = Assets.idOf(new String(b));
+            texId[i] = Assets.acquire("/t_" + new String(b) + ".png");
         }
         return texId;
     }
+    void unload() { if (tex != null) for (int i = 0; i < tex.length; i++) Assets.release(tex[i]); tex = null; }
 
     static Mesh loadWheel() throws IOException {
         DataInputStream d = new DataInputStream(new ByteArrayInputStream(Assets.readAll("/wheel.bin")));
