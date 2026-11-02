@@ -20,7 +20,7 @@ public class Shots {
         frames(10); shot("01_menu");
         g.press(Game.A_FIRE); g.frame(33); g.down = 0;
         w = g.world;
-        frames(40); shot("02_spawn");
+        frames(40); shot("02_spawn"); g.press(Game.A_PAUSE); g.frame(33); g.down = 0; g.sel = 2; g.press(Game.A_FIRE); g.frame(33); g.down = 0; frames(2); shot("02_map"); g.press(Game.A_FIRE); g.frame(33); g.down=0; g.sel = 0; g.press(Game.A_FIRE); g.frame(33); g.down = 0;
         System.out.println("spawn ground " + w.groundH(w.player.x, w.player.z, w.player.y) + " y " + w.player.y + " surf " + w.surfAt(w.player.x, w.player.z) + " peds " + w.nped + " cars " + w.ncars);
         for (int k = 1; k < 4; k++) { w.camYawOff = k * 256; frames(25); shot("03_look" + k); }
         w.camYawOff = 0;
@@ -49,6 +49,10 @@ public class Shots {
             g.keyPressed(-3); frames(40); shot("07_turn"); g.keyReleased(-3);
             g.keyPressed(48); g.keyPressed(-4); frames(30); shot("08_handbrake"); g.keyReleased(-4); g.keyReleased(48); g.keyReleased(-1);
             System.out.println("slide " + c.slide + " yawVel " + c.yawVel);
+            g.keyPressed(42); frames(2); g.keyReleased(42); frames(60);
+            w.camYawOff = 300; w.damageCar(c, 0, 2000); frames(50); shot("09_fire");
+            System.out.println("burning " + c.burning); frames(120); shot("10_explode");
+            System.out.println("wrecked " + c.wrecked + " health " + w.health);
         }
         long t0 = System.currentTimeMillis(); frames(60); System.out.println("desktop ms/frame " + (System.currentTimeMillis() - t0) / 60.0 + " tris " + g.r.tris);
         int loaded = 0; for (int k = 0; k < w.tiles.length; k++) if (w.tiles[k] != null) loaded++;

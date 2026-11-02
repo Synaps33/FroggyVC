@@ -2,7 +2,7 @@ import java.io.IOException;
 
 /** Vice City sky: timecyc gradient, drifting clouds, sun + corona, moon, stars, lens flare and the lighthouse glow. */
 final class Sky {
-    static int[] flash; static int sFlash;
+    static int[] flash, smoke, fire, explo; static int sFlash, sSmoke, sFire, sExplo;
     static int[] cloud1, cloud2, cloud3, hilit, corona, star, moon, ringa, hex, circle, reflect, streek;
     static int sCloud, sCorona, sStar, sMoon, sRing, sHex, sCircle, sReflect, sStreek;
     static int sunX, sunY, sunZ;              // direction towards the sun, 2.14
@@ -26,6 +26,9 @@ final class Sky {
         reflect = Assets.intensity("/fx_reflect.png", dm); sReflect = dm[0];
         streek = Assets.intensity("/fx_streek.png", dm); sStreek = dm[0];
         flash = Assets.intensity("/fx_flash.png", dm); sFlash = dm[0];
+        smoke = Assets.intensity("/fx_smoke.png", dm); sSmoke = dm[0];
+        fire = Assets.intensity("/fx_fire.png", dm); sFire = dm[0];
+        explo = Assets.intensity("/fx_explo.png", dm); sExplo = dm[0];
         int seed = 1234567;
         for (int i = 0; i < NSTAR; i++) {
             seed = seed * 1103515245 + 12345; starA[i] = (seed >>> 8) & 1023;
@@ -100,6 +103,21 @@ final class Sky {
         if (vz < 64) return;
         int s = r.focal * 40 / vz + 4;
         spr(r.fb, r.W, r.H, flash, sFlash, r.cx + vx * r.focal / vz, r.cy - vy * r.focal / vz, s, s, 0xFFD890, 0, 256);
+    }
+
+    /** world-space particle sprite; size in 1/64 m */
+    static void particle(R3D r, int type, int x, int y, int z, int size, int fade) {
+        int dx = x - r.camX, dy = y - r.camY, dz = z - r.camZ;
+        int[] m = r.mv;
+        int vz = (m[6] * dx + m[7] * dy + m[8] * dz) >> 14;
+        if (vz < 80 || vz > r.farZ) return;
+        int vx = (m[0] * dx + m[1] * dy + m[2] * dz) >> 14, vy = (m[3] * dx + m[4] * dy + m[5] * dz) >> 14;
+        int sx = r.cx + vx * r.focal / vz, sy = r.cy - vy * r.focal / vz, s = size * r.focal / vz;
+        if (s < 2) return;
+        if (sx >= 0 && sy >= 0 && sx < r.W && sy < r.H && r.zb[sy * r.W + sx] > ((1 << 24) / vz) * 260) return;   // behind a wall
+        if (type == 0) spr(r.fb, r.W, r.H, smoke, sSmoke, sx, sy, s, s, 0x606060, 1, fade * 3 / 4);
+        else if (type == 1) spr(r.fb, r.W, r.H, fire, sFire, sx, sy, s, s * 5 / 4, 0xFF9030, 0, fade);
+        else spr(r.fb, r.W, r.H, explo, sExplo, sx, sy, s, s, 0xFFB050, 0, fade);
     }
 
     static int mix(int a, int b, int t) {

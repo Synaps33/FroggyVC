@@ -54,7 +54,8 @@ def export(name, dff, txd, hi=320, lo=110):
     V = to_rig(g['verts'].astype(float))
     tris = g['tris']
     F = np.stack([tris[:, 0], tris[:, 1], tris[:, 2]], 1)
-    UV = g['uv'] if g['uv'] is not None else np.zeros((len(V), 2))
+    UV = g['uv'].copy() if g['uv'] is not None else np.zeros((len(V), 2))
+    UV[:, 1] = 1.0 - UV[:, 1]          # RW uvs are top-down already; build_and_export flips v again
     UVI = F.copy()
     tex = None
     for m in g['mats']:

@@ -374,19 +374,20 @@ public final class Game extends Canvas implements Runnable {
         } else {
             Ui.menuTitle(scr, W, H, u, "map");
             World w = world;
-            int mh = H * 70 / 100, mw = mh * w.rw / w.rh;
-            if (mw > W - 20 * u) { mw = W - 20 * u; mh = mw * w.rh / w.rw; }
-            int ox = W / 2 - mw / 2, oy = H * 22 / 100;
+            if (Ui.radImg == null) return;
+            int mh = H * 74 / 100, mw = mh * Ui.radW / Ui.radH;
+            if (mw > W - 20 * u) { mw = W - 20 * u; mh = mw * Ui.radH / Ui.radW; }
+            int ox = W / 2 - mw / 2, oy = H * 20 / 100;
             for (int j = 0; j < mh; j++) {
-                int mj = (mh - 1 - j) * w.rh / mh;
                 int yy = oy + j;
                 if (yy >= H) break;
-                for (int i = 0; i < mw; i++) scr[yy * W + ox + i] = Ui.MAPPAL[w.rad[mj * w.rw + i * w.rw / mw] & 7];
+                int sj = j * Ui.radH / mh;
+                for (int i = 0; i < mw; i++) scr[yy * W + ox + i] = Ui.radImg[sj * Ui.radW + i * Ui.radW / mw] & 0xFFFFFF;
             }
-            int pxm = (w.player.x - w.rx0) / w.rcell * mw / w.rw;
-            int pym = mh - 1 - (w.player.z - w.rz0) / w.rcell * mh / w.rh;
-            if ((blink / 300) % 2 == 0) Ui.fill(scr, W, H, ox + pxm - 2 * u, oy + pym - 2 * u, 4 * u, 4 * u, 0xFF40D0);
-            if (oLegend) Ui.text(scr, W, H, 6 * u, H - 12 * u, "pink dot: you   black: roads", 0xE0E0E0, 1);
+            int pxm = (w.player.x - Ui.radX0) / Ui.radCell * mw / Ui.radW;
+            int pym = (Ui.radZ0 - w.player.z) / Ui.radCell * mh / Ui.radH;
+            Ui.fill(scr, W, H, ox + pxm - 3 * u, oy + pym - 3 * u, 6 * u, 6 * u, 0x000000);
+            Ui.fill(scr, W, H, ox + pxm - 2 * u, oy + pym - 2 * u, 4 * u, 4 * u, (blink / 300) % 2 == 0 ? 0xFF40D0 : 0xFFFFFF);
         }
     }
 

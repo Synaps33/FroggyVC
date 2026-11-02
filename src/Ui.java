@@ -21,7 +21,7 @@ final class Ui {
             case 2: loadFont(); break;
             case 3: hud = Assets.imgPix("/hud.png", dm); break;
             case 4: logo = Assets.imgPix("/logo.png", dm); logoW = dm[0]; logoH = dm[1]; break;
-            case 5: bg = Assets.imgPix("/menu_bg.png", dm); bgW = dm[0]; bgH = dm[1]; break;
+            case 5: bg = Assets.imgPix("/menu_bg.png", dm); bgW = dm[0]; bgH = dm[1]; loadRadar(); break;
             case 6: scr[2] = Assets.imgPix("/ls1.png", dm); break;
             case 7: scr[3] = Assets.imgPix("/ls2.png", dm); break;
             case 8: scr[4] = Assets.imgPix("/ls3.png", dm); break;
@@ -210,7 +210,23 @@ final class Ui {
 
     static final int[] MAPPAL = { 0x4A86C8, 0xE6D9A6, 0x56A456, 0xB4B4BC, 0x2C2C30, 0x8C8478, 0xDCDCE4, 0x000000 };
 
+    static int[] radImg; static int radW, radH, radX0, radZ0, radCell;
+    static void loadRadar() {
+        try {
+            int[] d = new int[2];
+            radImg = Assets.imgPix("/radar.png", d); radW = d[0]; radH = d[1];
+            String[] l = Assets.readLines("/radar.txt");
+            String t = l[0]; int a = t.indexOf(' '), b = t.indexOf(' ', a + 1);
+            radX0 = Integer.parseInt(t.substring(0, a)); radZ0 = Integer.parseInt(t.substring(a + 1, b)); radCell = Integer.parseInt(t.substring(b + 1).trim());
+        } catch (Exception e) { radImg = null; }
+    }
+    /** colour of the radar picture at a world position (north up) */
     static int radarCol(World w, int xm, int zm) {
+        if (radImg != null) {
+            int i = (xm - radX0) / radCell, j = (radZ0 - zm) / radCell;
+            if (xm < radX0 || zm > radZ0 || i >= radW || j >= radH) return 0x78BEF0;
+            return radImg[j * radW + i] & 0xFFFFFF;
+        }
         int i = (xm - w.rx0) / w.rcell, j = (zm - w.rz0) / w.rcell;
         if (xm < w.rx0 || zm < w.rz0 || i >= w.rw || j >= w.rh) return MAPPAL[0];
         return MAPPAL[w.rad[j * w.rw + i] & 7];
@@ -237,8 +253,10 @@ final class Ui {
         }
         // blips
         int mmpp = 66 * 1024 / R;
-        for (int i = 0; i < w.nped; i++) blip(b, bw, bh, w, w.peds[i].x, w.peds[i].z, cx, cy, R, cs, sn, mmpp, w.peds[i].cop ? 0x4060FF : 0xF080D8, u, w.peds[i].state == Ped.DEAD);
-        for (int i = 0; i < w.ncars; i++) blip(b, bw, bh, w, w.cars[i].x, w.cars[i].z, cx, cy, R, cs, sn, mmpp, w.cars[i].mode == Car.PARKED ? 0xFF8A2A : 0x8CE0FF, u, false);
+        // like VC: no ped / car blips, only the cops while you are wanted
+        if (w.wanted > 0) {
+            for (int i = 0; i < w.nped; i++) if (w.peds[i].cop) blip(b, bw, bh, w, w.peds[i].seat != null ? w.peds[i].seat.x : w.peds[i].x, w.peds[i].seat != null ? w.peds[i].seat.z : w.peds[i].z, cx, cy, R, cs, sn, mmpp, (w.time / 250) % 2 == 0 ? 0x2040FF : 0xFF2020, u, w.peds[i].state == Ped.DEAD);
+        }
         // player arrow
         int pyaw = (w.inCar != null ? w.inCar.yaw : w.player.yaw) - th;
         int ax = Fx.sin(pyaw), az = -Fx.cos(pyaw);

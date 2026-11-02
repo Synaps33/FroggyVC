@@ -20,7 +20,7 @@ FONTS = os.path.join(ROOT, 'assets', 'fonts')
 SPRITES = {  # name: (source, size)
     'cloud1': ('cloud1', 64), 'cloud2': ('cloud2', 64), 'cloud3': ('cloud3', 64), 'cloudhilit': ('cloudhilit', 64),
     'corona': ('corona', 64), 'star': ('coronastar', 32), 'moon': ('coronamoon', 32), 'ringa': ('coronaringa', 64),
-    'hex': ('coronahex', 32), 'flash': ('gunflash1', 32), 'circle': ('coronacircle', 32), 'reflect': ('coronareflect', 32), 'streek': ('streek', 32),
+    'hex': ('coronahex', 32), 'flash': ('gunflash1', 32), 'smoke': ('smoke1', 32), 'fire': ('flame1', 32), 'explo': ('explo02', 64), 'circle': ('coronacircle', 32), 'reflect': ('coronareflect', 32), 'streek': ('streek', 32),
 }
 
 

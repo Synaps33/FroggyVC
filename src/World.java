@@ -278,7 +278,9 @@ final class World implements Runnable {
     static final String BIKE = " angel freeway pcj600 sanchez faggio pizzaboy ";
     static final String SLOW = " caddy baggage ";
     /** handling.cfg-like classes: top speed km/h, acceleration, steering lock, mass, tyre grip */
+    String[] hdl;
     void handling(CarModel m) {
+        if (hdl == null) hdl = Assets.readLines("/handling.txt");
         String k = " " + m.name + " ";
         int mv = 160, ac = 22, lk = 32, mass = 1500, grip = 100, cls = 0;
         if (BIKE.indexOf(k) >= 0) { mv = m.name.equals("faggio") || m.name.equals("pizzaboy") ? 100 : 180; ac = 30; lk = 38; mass = 350; grip = 130; cls = 3; }
@@ -287,6 +289,14 @@ final class World implements Runnable {
         else if (SLOW.indexOf(k) >= 0) { mv = 60; ac = 12; lk = 40; mass = 500; grip = 110; cls = 4; }
         if (m.name.equals("police") || m.name.equals("fbicar")) { mv = 190; ac = 26; }
         m.vmax = mv * 10 / 36; m.accel = ac * 20; m.brake = 1100; m.lockDeg = lk; m.mass = mass; m.grip = grip; m.cls = cls;
+        // real values from handling.cfg when the vehicle is listed there
+        for (int i = 0; i < hdl.length; i++) {
+            if (!hdl[i].startsWith(m.name + " ")) continue;
+            int[] v = new int[6]; int p = m.name.length() + 1;
+            for (int f = 0; f < 6; f++) { int q = hdl[i].indexOf(' ', p); if (q < 0) q = hdl[i].length(); v[f] = Integer.parseInt(hdl[i].substring(p, q).trim()); p = q + 1; }
+            m.mass = v[0]; m.grip = v[1]; m.vmax = v[2] * 10 / 36; m.accel = v[3] * 2; m.brake = v[4]; m.lockDeg = v[5];
+            break;
+        }
         m.wheelbase = m.dimZ * 16 * 6 / 10;
         if (m.wheelbase < 900) m.wheelbase = 900;
     }
@@ -366,10 +376,24 @@ final class World implements Runnable {
         inCar = null; pActCar = null; pAct = 0;
         ncars = 0; nped = 0;
         health = 100; armor = 0; money = 0; wanted = 0; pedsHit = 0; carsStolen = 0; kills = 0; quietKills = 0; quietLimit = 3 + Fx.rnd(3);
-        minutes = 14 * 60 + 18; wastedT = 0; helpShown = 0; helpT = 0; busted = false; bustedT = 0; drownT = 0; runMode = false;
+        minutes = 22 * 60; wastedT = 0; helpShown = 0; helpT = 0; busted = false; bustedT = 0; drownT = 0; runMode = false;
         weapon = 0; hasBat = false; hasPistol = false; ammo = 0;
         camYawOff = 0; camYaw = player.yaw; camPitch = 55;
         preload(player.x, player.z);
+        // the white Admiral parked next to Tommy, like the start of the game
+        int adm = find(carNames, "admiral"), slot = -1;
+        for (int i = 0; i < NCPOOL; i++) if (cpoolSrc[i] == adm && cpool[i] != null) slot = i;
+        if (slot >= 0) {
+            int fx = Fx.sin(player.yaw), fz = Fx.cos(player.yaw);
+            int[] off = { 3000, 2600, 3000, -2600, 6000, 2600, 6000, -2600, 4000, 0 };
+            for (int k = 0; k < off.length; k += 2) {
+                int x = player.x + ((fx * off[k] + fz * off[k + 1]) >> 14), z = player.z + ((fz * off[k] - fx * off[k + 1]) >> 14);
+                if (!walkable(x, z, player.y)) continue;
+                Car c = addCar(Car.PARKED, slot, x, z, player.yaw, 4);
+                if (c != null) { c.color = 0xF2F2F2; c.color2 = 0xF2F2F2; c.y = groundH(x, z, player.y); }
+                break;
+            }
+        }
         npick = 0;
         addPickup(2, 2600, 1200);
         addPickup(1, -2200, 1800);
@@ -927,16 +951,15 @@ final class World implements Runnable {
             boolean canFall = p == CarModel.P_BUMP_F || p == CarModel.P_BUMP_R || p == CarModel.P_BONNET || p == CarModel.P_BOOT || (p >= CarModel.P_DOOR_LF && p <= CarModel.P_DOOR_RR);
             if (canFall && c.partDmg[p] > 700) c.lostBits |= 1 << p;
         }
-        if (c.hp <= 0 && !c.wrecked) {
-            c.wrecked = true; c.color = 0x2A2622; c.color2 = 0x2A2622; c.vx = c.vz = 0; c.speed = 0;
-            Snd.play(Snd.EXPLODE); shake = 500;
-            if (c == inCar) { hurt(60); say("This vehicle is wrecked."); }
-            else if (Fx.dist(c.x - player.x, c.z - player.z) < 6000) hurt(30);
+        if (c.hp <= 0 && !c.wrecked && !c.burning) {            // engine catches fire, explodes a few seconds later
+            c.hp = 0; c.burning = true; c.burnT = 0;
+            if (c == inCar) say("Get out, it's going to blow!");
         }
     }
 
     void moveCar(Car c, int dt) {
         int ox = c.x, oz = c.z;
+        int gHere = Math.max(c.y, groundH(c.x, c.z, c.y));
         c.x += c.vx * dt / 1000; c.z += c.vz * dt / 1000;
         CarModel m = cm(c);
         int half = m.bike ? 500 : m.dimZ * 16 / 2 - 900, rad = m.bike ? 380 : m.dimX * 16 / 2 + 60;
@@ -948,8 +971,8 @@ final class World implements Runnable {
             rx = c.x + ox2; rz = c.z + oz2;
             int bx = rx, bz = rz;
             if (resolve(rad)) { hit = true; nx += rx - bx; nz += rz - bz; c.x = rx - ox2; c.z = rz - oz2; }
-            int g = groundH(c.x + ox2, c.z + oz2, c.y);
-            if (g - c.y > 45 && g > -60) { hit = true; nx += ox - c.x; nz += oz - c.z; c.x = ox; c.z = oz; }
+            int g = groundH(c.x + ox2, c.z + oz2, gHere);
+            if (g - gHere > 72 && g > -60) { hit = true; nx += ox - c.x; nz += oz - c.z; c.x = ox; c.z = oz; }   // > 1.1 m: a wall, not a kerb or ramp
         }
         if (hit) {
             int nl = Fx.dist(nx, nz);
@@ -961,7 +984,7 @@ final class World implements Runnable {
             int imp = Fx.abs(vn);
             if (imp > 3500) {
                 if (c.mode == Car.PLAYER) { shake = 300; hurt(imp / 6000); }
-                damageCar(c, c.speed > 0 ? 0 : 1, imp / 45);
+                damageCar(c, c.speed > 0 ? 0 : 1, imp / 140);
                 if (Fx.dist(c.x - player.x, c.z - player.z) < 40000) Snd.play(Snd.CRASH);
             }
             c.vx = c.vx * 85 / 100; c.vz = c.vz * 85 / 100;
@@ -987,8 +1010,8 @@ final class World implements Runnable {
                     o.vx += jo * ddx / d; o.vz += jo * ddz / d;
                     if (vn > 3000) {
                         if (c.mode == Car.PLAYER || o.mode == Car.PLAYER) { shake = 250; Snd.play(Snd.CRASH); }
-                        damageCar(c, regionOf(c, o.x, o.z), vn / 60);
-                        damageCar(o, regionOf(o, c.x, c.z), vn / 60);
+                        damageCar(c, regionOf(c, o.x, o.z), vn / 200);
+                        damageCar(o, regionOf(o, c.x, c.z), vn / 200);
                         if ((o.mode == Car.POLICE || (o.driver != null && o.driver.cop)) && c.mode == Car.PLAYER) raiseWanted(1);
                     }
                 }
@@ -996,7 +1019,7 @@ final class World implements Runnable {
         }
         int g = groundH(c.x, c.z, c.y);
         if (g < c.y - 8) { c.vy -= 9800 * 64 / 1024 * dt / 1000; c.y += c.vy * dt / 1000; if (c.y < g) { c.y = g; c.vy = 0; } }
-        else { c.y += (g - c.y) * Math.min(dt, 100) / 60; c.vy = 0; }
+        else { if (g > c.y) c.y = g; else c.y += (g - c.y) * Math.min(dt, 100) / 40; c.vy = 0; }
         c.wheelRot = (c.wheelRot + c.speed * dt / 1000 * 1024 / 2200) & 1023;
         if (Fx.abs(c.speed) > 2500) {
             for (int i = 0; i < nped; i++) {
@@ -1017,6 +1040,52 @@ final class World implements Runnable {
         }
     }
 
+    void explode(Car c) {
+        c.wrecked = true; c.burning = false; c.color = 0x2A2622; c.color2 = 0x2A2622; c.vx = c.vz = 0; c.speed = 0;
+        c.lostBits |= (1 << CarModel.P_BONNET) | (1 << CarModel.P_DOOR_LF) | (1 << CarModel.P_BOOT); c.damBits = -1;
+        Snd.play3d(Snd.EXPLODE, c.x, c.z, player.x, player.z);
+        for (int k = 0; k < 6; k++) spawnFx(2, (c.x >> 4) + Fx.rnd(120) - 60, c.y + 40 + Fx.rnd(60), (c.z >> 4) + Fx.rnd(120) - 60);
+        int d = Fx.dist(c.x - player.x, c.z - player.z);
+        if (d < 30000) shake = 600;
+        if (c == inCar) { health = 0; wastedT = 0; }
+        else if (d < 7000 && inCar == null) hurt(110 - d / 100);
+        for (int i = 0; i < nped; i++) {
+            Ped p = peds[i];
+            if (p.state != Ped.DEAD && p.seat == null && Fx.dist(p.x - c.x, p.z - c.z) < 6000) damagePed(p, 200, false, c.x, c.z);
+        }
+        for (int i = 0; i < ncars; i++) if (cars[i] != c && Fx.dist(cars[i].x - c.x, cars[i].z - c.z) < 7000) damageCar(cars[i], regionOf(cars[i], c.x, c.z), 300);
+    }
+
+    // ---- particles: 0 smoke (blended), 1 fire, 2 explosion (additive). positions 1/64 m
+    static final int NFX = 72;
+    int[] fxX = new int[NFX], fxY = new int[NFX], fxZ = new int[NFX], fxT = new int[NFX], fxL = new int[NFX], fxM = new int[NFX];
+    void spawnFx(int type, int x, int y, int z) {
+        int k = -1;
+        for (int i = 0; i < NFX; i++) if (fxL[i] <= 0) { k = i; break; }
+        if (k < 0) k = Fx.rnd(NFX);
+        fxX[k] = x; fxY[k] = y; fxZ[k] = z; fxT[k] = type;
+        fxM[k] = fxL[k] = type == 0 ? 1800 + Fx.rnd(600) : (type == 1 ? 450 + Fx.rnd(250) : 900);
+    }
+    void updateParticles(int dt) {
+        for (int i = 0; i < NFX; i++) {
+            if (fxL[i] <= 0) continue;
+            fxL[i] -= dt;
+            int up = fxT[i] == 0 ? 90 : (fxT[i] == 1 ? 130 : 30);
+            fxY[i] += up * dt / 1000;
+            if (fxT[i] == 0) fxX[i] += 20 * dt / 1000;                 // a little wind
+        }
+    }
+    void drawParticles() {
+        for (int i = 0; i < NFX; i++) {
+            if (fxL[i] <= 0) continue;
+            int age = 256 - fxL[i] * 256 / fxM[i];
+            int size = fxT[i] == 0 ? 70 + age / 2 : (fxT[i] == 1 ? 130 - age / 6 : 160 + age);
+            int fade = fxT[i] == 0 ? (age < 40 ? age * 4 : 300 - age) : 256 - age;
+            if (fade <= 0) continue;
+            Sky.particle(r, fxT[i], fxX[i], fxY[i], fxZ[i], size, fade > 256 ? 256 : fade);
+        }
+    }
+
     int regionOf(Car c, int x, int z) {
         int dx = x - c.x, dz = z - c.z;
         int lx = (Fx.cos(c.yaw) * dx - Fx.sin(c.yaw) * dz) >> 14, lz = (Fx.sin(c.yaw) * dx + Fx.cos(c.yaw) * dz) >> 14;
@@ -1025,8 +1094,21 @@ final class World implements Runnable {
     }
 
     void updateWorld(int dt) {
+        updateParticles(dt);
         for (int i = 0; i < ncars; i++) {
             Car c = cars[i];
+            if (!c.wrecked) {
+                c.fxT += dt;
+                CarModel m = cm(c);
+                int ez = m.bike ? 0 : m.dimZ * 30 / 100;
+                if (c.burning) {
+                    c.burnT += dt;
+                    if (c.fxT > 50) { c.fxT = 0; spawnFx(1, localX(c, Fx.rnd(60) - 30, ez - 30), c.y + m.dimY * 6 / 10, localZ(c, Fx.rnd(60) - 30, ez - 30)); spawnFx(1, localX(c, Fx.rnd(40) - 20, ez), c.y + m.dimY * 7 / 10, localZ(c, Fx.rnd(40) - 20, ez)); spawnFx(0, localX(c, 0, ez), c.y + m.dimY, localZ(c, 0, ez)); }
+                    if (c.burnT > 5000) explode(c);
+                } else if (c.hp < 450 && c.fxT > (c.hp < 250 ? 90 : 220)) {
+                    c.fxT = 0; spawnFx(0, localX(c, 0, ez), c.y + m.dimY * 7 / 10, localZ(c, 0, ez));
+                }
+            }
             if (c.mode == Car.TRAFFIC) trafficAI(c, dt);
             else if (c.mode == Car.POLICE) policeAI(c, dt);
             else if (c.mode == Car.PARKED && (c.vx != 0 || c.vz != 0)) driveCar(c, dt, 0, 0, true);
@@ -1330,6 +1412,7 @@ final class World implements Runnable {
         }
         drawPed(player);
         drawPickups();
+        drawParticles();
         for (int i = 0; i < ncars; i++) drawCar(cars[i], true);
         if (night) drawBeam();
         Sky.drawPost(this, r);
