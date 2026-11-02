@@ -27,14 +27,6 @@ To make a different region, change `MAP_REGION=i0,j0,i1,j1` in `.github/workflow
 
 On the E72 QWERTY keyboard, use **Fn** (or numeric lock) for the number keys.
 
-## New in this build
-* Ped and Tommy textures fixed (the UVs were flipped twice).
-* Starts at night (22:00) with the white Admiral parked next to Tommy.
-* Cars use the real `handling.cfg` values (mass, traction, top speed, acceleration, brakes, steering lock).
-* Cars no longer get stuck on bridge ramps and kerbs: only steps over 1.1 m count as walls.
-* Damage takes much longer. Panels dent and then fall off, the engine smokes when damaged, and at 0 HP it catches fire. About 5 s later it explodes: it kills you if you're still inside and hurts anyone close.
-* The radar and pause map use your VC map picture (auto-aligned to the world). No ped or car blips, only flashing cops while you're wanted.
-
 ## What's in it
 * **Full map**:
   * The 1.5 M-triangle Blender export is cut into 1,216 tiles of 100 m. They stream in on a background thread with a near and a far version of each tile, and textures load on demand into a 512-slot cache.
