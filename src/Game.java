@@ -2,10 +2,12 @@ import javax.microedition.lcdui.*;
 
 /** Canvas + main loop + state machine (intro, loading, menus, game). */
 public final class Game extends Canvas implements Runnable {
-    static final int S_LOAD = 0, S_MENU = 1, S_OPT = 2, S_PLAY = 3, S_PAUSE = 4, S_CTRL = 5, S_MAP = 6, S_STATS = 7, S_SPLASH = 8, S_VIDEO = 9;
+    static final int S_LOAD = 0, S_MENU = 1, S_OPT = 2, S_PLAY = 3, S_PAUSE = 4, S_CTRL = 5, S_MAP = 6, S_STATS = 7, S_SPLASH = 8, S_VIDEO = 9, S_START = 10, S_DEBUG = 11;
     // logical key actions
     static final int A_UP = 1, A_DOWN = 2, A_LEFT = 4, A_RIGHT = 8, A_FIRE = 16, A_ENTER = 32, A_CAML = 64, A_CAMR = 128,
             A_CAMU = 256, A_CAMD = 512, A_SPRINT = 1024, A_HAND = 2048, A_PAUSE = 4096, A_WEAP = 8192;
+    int startMs, startKind, playFade = 9999, dbgSel, dbgCar, gameSpeed = 100;
+    boolean legacy = Assets.legacy;
 
     final GtaMidlet midlet;
     int W, H, u = 1, rs = 1;
@@ -38,6 +40,7 @@ public final class Game extends Canvas implements Runnable {
 
     public Game(GtaMidlet m) {
         midlet = m;
+        if (legacy) { oRes = 1; oDraw = 4; }
         setFullScreenMode(true);
         Fx.init();
         total = Ui.UI_STEPS + 7;
@@ -51,12 +54,12 @@ public final class Game extends Canvas implements Runnable {
         thread = new Thread(this);
         thread.start();
     }
-    void stop() { running = false; if (world != null) world.alive = false; Snd.stopAll(); }
+    void stop() { if (started && world != null) Save.write(world); running = false; if (world != null) world.alive = false; Snd.stopAll(); }
 
     protected void showNotify() { paused = false; }
     protected void hideNotify() {
         paused = true;
-        if (state == S_PLAY) { prevState = S_PLAY; state = S_PAUSE; sel = 0; Snd.stopAll(); }
+        if (state == S_PLAY) { prevState = S_PLAY; state = S_PAUSE; sel = 0; Snd.stopAll(); Save.write(world); }
     }
     protected void sizeChanged(int w, int h) { W = w; H = h; needResize = true; }
 
@@ -83,7 +86,7 @@ public final class Game extends Canvas implements Runnable {
             case KEY_NUM6: return A_CAMR;
             case KEY_NUM5: case 'f': case 'F': return A_FIRE;
             case KEY_STAR: case 'e': case 'E': return A_ENTER;
-            case KEY_NUM1: case 'q': case 'Q': return A_SPRINT;
+            case KEY_NUM1: case 'q': case 'Q': return A_SPRINT;   // tap: run on/off, hold: sprint
             case KEY_NUM0: case ' ': case 'b': case 'B': return A_HAND;
             case KEY_POUND: case 'p': case 'P': case 27: return A_PAUSE;
             case KEY_NUM3: case 'r': case 'R': return A_WEAP;
@@ -110,9 +113,16 @@ public final class Game extends Canvas implements Runnable {
         return 0;
     }
     int anyKey;
-    protected void keyPressed(int k) { anyKey++; press(mapKey(k)); }
+    protected void keyPressed(int k) { anyKey++; int a = mapKey(k); if (a == A_SPRINT) sprintPress = (int) System.currentTimeMillis(); press(a); }
     protected void keyRepeated(int k) { int a = mapKey(k); edges |= a & (A_UP | A_DOWN | A_LEFT | A_RIGHT); }
-    protected void keyReleased(int k) { down &= ~mapKey(k); }
+    protected void keyReleased(int k) {
+        int a = mapKey(k);
+        if (a == A_SPRINT && sprintPress > 0 && (int) System.currentTimeMillis() - sprintPress < 350) edges |= A_TAPRUN;
+        if (a == A_SPRINT) sprintPress = 0;
+        down &= ~a;
+    }
+    static final int A_TAPRUN = 16384;
+    int sprintPress;
     void press(int a) { down |= a; edges |= a; }
 
     // ------------------------------------------------------------ main loop
@@ -153,6 +163,8 @@ public final class Game extends Canvas implements Runnable {
             case S_VIDEO: doVideo(); break;
             case S_LOAD: doLoad(dt, e); break;
             case S_MENU: doMenu(e); break;
+            case S_START: doStart(dt); break;
+            case S_DEBUG: doDebug(e); break;
             case S_OPT: doOptions(e); break;
             case S_CTRL: case S_MAP: case S_STATS: if ((e & (A_FIRE | A_PAUSE | A_ENTER)) != 0) state = prevState == S_PLAY || prevState == S_PAUSE ? S_PAUSE : S_MENU; draw2(); break;
             case S_PAUSE: doPause(e); break;
@@ -165,8 +177,10 @@ public final class Game extends Canvas implements Runnable {
             if (f < 256) for (int q = 0; q < scr.length; q++) { int c = scr[q]; scr[q] = ((((c & 0xFF00FF) * f) >>> 8) & 0xFF00FF) | ((((c & 0xFF00) * f) >>> 8) & 0xFF00); }
         }
         if (rs > 1 && state == S_PLAY) upscale();
+        if (oTrails && state == S_PLAY) ps2Filter();
         if (state == S_PLAY) overlay();
-        if (oTrails && state == S_PLAY) doTrails();
+        if (state == S_PLAY && legacyTouch()) drawTouch();
+        if (state == S_PLAY && playFade < 800) { playFade += dt; dim(playFade < 100 ? 0 : (playFade - 100) * 256 / 700); }
     }
 
     // ------------------------------------------------------------ splash / intro movie
@@ -250,6 +264,8 @@ public final class Game extends Canvas implements Runnable {
 
     // ------------------------------------------------------------ menus
     static final String[] MAIN = { "start game", "options", "controls", "quit game" };
+    static final String[] MAIN_C = { "continue", "start new game", "options", "controls", "quit game" };
+    boolean hasSave, saveChecked;
     static final String[] PAUSE = { "resume", "start new game", "map", "stats", "brief", "options", "quit game" };
 
     void menuNav(int e, int n) {
@@ -270,15 +286,81 @@ public final class Game extends Canvas implements Runnable {
     void scrClearFull() { if (rs > 1 || scr == null || scr.length != W * H) { } }
 
     void doMenu(int e) {
-        menuNav(e, MAIN.length);
+        if (!saveChecked) { hasSave = Save.exists(); saveChecked = true; }
+        String[] items = hasSave ? MAIN_C : MAIN;
+        menuNav(e, items.length);
         if ((e & A_FIRE) != 0) {
-            if (sel == 0) { world.reset(); applyOptions(); state = S_PLAY; down = 0; titleMs = 0; started = true; }
-            else if (sel == 1) { prevState = S_MENU; state = S_OPT; optSel = 0; }
-            else if (sel == 2) { prevState = S_MENU; state = S_CTRL; }
+            int s = hasSave ? sel - 1 : sel;
+            if (hasSave && sel == 0) { state = S_START; startMs = 0; startKind = 1; }
+            else if (s == 0) { state = S_START; startMs = 0; startKind = 0; }
+            else if (s == 1) { prevState = S_MENU; state = S_OPT; optSel = 0; }
+            else if (s == 2) { prevState = S_MENU; state = S_CTRL; }
             else { running = false; }
         }
-        drawMenu("grand theft auto", MAIN);
+        drawMenu("grand theft auto", items);
         Ui.textC(scr, W, H, W / 2, H - 14 * u, "a port made by aidencantcode", 0xB0B0C0, 1);
+    }
+
+    /** fade the menu to black, set the world up, then fade the game in */
+    void doStart(int dt) {
+        startMs += dt;
+        drawMenu("grand theft auto", hasSave ? MAIN_C : MAIN);
+        int f = 256 - startMs * 256 / 500;
+        if (f < 0) f = 0;
+        dim(f);
+        if (startMs >= 550) {
+            world.reset();
+            if (startKind == 1) Save.load(world);
+            applyOptions(); state = S_PLAY; down = 0; edges = 0; titleMs = 0; started = true; playFade = 0;
+        }
+    }
+    void dim(int f) {
+        if (f >= 256) return;
+        for (int q = 0; q < scr.length; q++) { int c = scr[q]; scr[q] = ((((c & 0xFF00FF) * f) >>> 8) & 0xFF00FF) | ((((c & 0xFF00) * f) >>> 8) & 0xFF00); }
+    }
+
+    // ------------------------------------------------------------ debug / trainer menu (0 + *)
+    static final String[] DBG = { "spawn car", "time of day", "tommy speed", "game speed", "god mode", "clear wanted level", "give weapons + $5000", "teleport to spawn", "back" };
+    void doDebug(int e) {
+        World w = world;
+        int n = DBG.length;
+        if ((e & A_UP) != 0) dbgSel = (dbgSel + n - 1) % n;
+        if ((e & A_DOWN) != 0) dbgSel = (dbgSel + 1) % n;
+        int d = ((e & A_RIGHT) != 0 ? 1 : 0) - ((e & A_LEFT) != 0 ? 1 : 0);
+        boolean ok = (e & A_FIRE) != 0;
+        switch (dbgSel) {
+            case 0: dbgCar = (dbgCar + d + w.carNames.length) % w.carNames.length; if (ok) { w.debugSpawn(dbgCar); state = S_PLAY; } break;
+            case 1: if (d != 0) w.minutes = (w.minutes + d * 30 + 1440) % 1440; break;
+            case 2: if (d != 0) w.speedMul = Fx.clamp(w.speedMul + d * 25, 50, 300); break;
+            case 3: if (d != 0) gameSpeed = Fx.clamp(gameSpeed + d * 25, 25, 300); break;
+            case 4: if (ok || d != 0) w.god = !w.god; break;
+            case 5: if (ok) { w.wanted = 0; w.clearCops(); } break;
+            case 6: if (ok) { w.hasBat = true; w.hasPistol = true; w.ammo += 200; w.money += 5000; } break;
+            case 7: if (ok) { w.inCar = null; w.player.seat = null; w.pAct = 0; w.placePlayerAtSpawn(); w.preload(w.player.x, w.player.z); state = S_PLAY; } break;
+            default: if (ok) state = S_PLAY; break;
+        }
+        if ((e & A_PAUSE) != 0) state = S_PLAY;
+        if (state == S_PLAY) { down = 0; return; }
+        w.render();
+        if (rs > 1) upscale();
+        Ui.fillA(scr, W, H, 0, 0, W, H, 0x000000, 150);
+        Ui.textC(scr, W, H, W / 2, 6 * u, "debug menu", Ui.PINK, u);
+        int y0 = 24 * u, st = 13 * u;
+        for (int i = 0; i < n; i++) {
+            String v = "";
+            switch (i) {
+                case 0: v = "< " + w.carNames[dbgCar] + " >"; break;
+                case 1: v = "< " + w.clockStr() + " >"; break;
+                case 2: v = "< x" + w.speedMul / 100 + "." + (w.speedMul % 100) / 10 + " >"; break;
+                case 3: v = "< x" + gameSpeed / 100 + "." + (gameSpeed % 100) / 10 + " >"; break;
+                case 4: v = w.god ? "on" : "off"; break;
+                default: break;
+            }
+            int y = y0 + i * st;
+            if (i == dbgSel) Ui.fill(scr, W, H, 6 * u, y - u, W - 12 * u, 12 * u, Ui.HILITE);
+            Ui.text(scr, W, H, 10 * u, y, DBG[i], Ui.WHITE, u);
+            if (v.length() > 0) Ui.textR(scr, W, H, W - 10 * u, y, v, Ui.BLUE, u);
+        }
     }
 
     void doPause(int e) {
@@ -292,13 +374,13 @@ public final class Game extends Canvas implements Runnable {
                 case 3: prevState = S_PAUSE; state = S_STATS; break;
                 case 4: prevState = S_PAUSE; state = S_CTRL; break;
                 case 5: prevState = S_PAUSE; state = S_OPT; optSel = 0; break;
-                default: state = S_MENU; sel = 0; break;
+                default: Save.write(world); saveChecked = false; state = S_MENU; sel = 0; break;
             }
         }
         if (state == S_PAUSE) drawMenu("pause menu", PAUSE);
     }
 
-    static final String[] OPT_NAMES = { "brightness", "draw distance", "frame limiter", "trails", "subtitles", "wide screen",
+    static final String[] OPT_NAMES = { "brightness", "draw distance", "frame limiter", "ps2 filter", "subtitles", "wide screen",
             "map legend", "radar mode", "hud mode", "screen resolution", "restore defaults", "back" };
 
     void doOptions(int e) {
@@ -362,8 +444,8 @@ public final class Game extends Canvas implements Runnable {
         int x = W * 14 / 100, y = H * 24 / 100, st = 12 * u;
         if (state == S_CTRL) {
             Ui.menuTitle(scr, W, H, u, "controls");
-            String[] t = { "d-pad: walk / turn / steer", "fire / 5: punch (3 hit combo) / gas", "*: enter / exit / steal car", "2 8: look up / down   4 6: look around",
-                    "0: toggle run / walk  (in car: handbrake)", "1 (hold): sprint   3: switch weapon", "down: brake / reverse", "soft key or #: pause menu" };
+            String[] t = { "d-pad: walk / turn / steer", "5: punch, hold to shoot (lock-on)", "*: enter / exit / steal car", "2 8: look up / down   4 6: look around",
+                    "1: tap run / walk, hold sprint", "0: jump  (in car: handbrake)", "3: switch weapon   0 + *: debug menu", "soft key or #: pause menu" };
             for (int i = 0; i < t.length; i++) Ui.text(scr, W, H, x, y + i * st, t[i], Ui.PINK, u);
         } else if (state == S_STATS) {
             Ui.menuTitle(scr, W, H, u, "stats");
@@ -393,7 +475,9 @@ public final class Game extends Canvas implements Runnable {
 
     // ------------------------------------------------------------ gameplay
     void doPlay(int dt, int e) {
-        if ((e & A_PAUSE) != 0) { state = S_PAUSE; sel = 0; prevState = S_PLAY; return; }
+        if ((down & A_HAND) != 0 && (e & A_ENTER) != 0) { state = S_DEBUG; dbgSel = 0; edges = 0; return; }   // 0 + *
+        dt = dt * gameSpeed / 100;
+        if ((e & A_PAUSE) != 0) { state = S_PAUSE; sel = 0; prevState = S_PLAY; Save.write(world); Snd.stopAll(); return; }
         int k = 0, d = down;
         if ((d & A_UP) != 0) k |= World.K_UP;
         if ((d & A_DOWN) != 0) k |= World.K_DOWN;
@@ -407,7 +491,7 @@ public final class Game extends Canvas implements Runnable {
         if ((d & A_SPRINT) != 0) k |= World.K_SPRINT;
         if ((d & A_HAND) != 0) k |= World.K_HAND;
         titleMs += dt;
-        world.update(dt, k, (e & A_FIRE) != 0, (e & A_ENTER) != 0, (e & A_HAND) != 0 && world.inCar == null, (e & A_WEAP) != 0);
+        world.update(dt, k, (e & A_FIRE) != 0, (e & A_ENTER) != 0, (e & A_TAPRUN) != 0, (e & A_WEAP) != 0, (e & A_HAND) != 0 && world.inCar == null);
         // contextual help like the original
         World w = world;
         if (w.inCar == null && w.helpT <= 0 && w.helpShown == 0) {
@@ -428,13 +512,87 @@ public final class Game extends Canvas implements Runnable {
         }
     }
 
-    void doTrails() {
-        if (trail == null || trail.length != scr.length) { trail = new int[scr.length]; System.arraycopy(scr, 0, trail, 0, scr.length); return; }
-        for (int i = 0; i < scr.length; i++) {
-            int a = scr[i], b = trail[i];
-            int m = (((a >> 1) & 0x7F7F7F) + ((b >> 1) & 0x7F7F7F));
-            scr[i] = m; trail[i] = m;
+    /** "PS2" look: motion trails, warm colour grade and a soft bloom from the bright parts of the frame */
+    int[] blm, blm2;
+    void ps2Filter() {
+        int bw = W >> 2, bh = H >> 2;
+        if (blm == null || blm.length != bw * bh) { blm = new int[bw * bh]; blm2 = new int[bw * bh]; }
+        // bright pass at 1/4 resolution
+        for (int y = 0; y < bh; y++) for (int x = 0; x < bw; x++) {
+            int c = scr[(y << 2) * W + (x << 2)];
+            int r0 = (c >> 16) & 255, g0 = (c >> 8) & 255, b0 = c & 255;
+            int l = (r0 * 77 + g0 * 150 + b0 * 29) >> 8;
+            int k = l > 150 ? (l - 150) * 2 : 0;
+            blm[y * bw + x] = ((r0 * k >> 8) << 16) | ((g0 * k >> 8) << 8) | (b0 * k >> 8);
         }
+        // 2 box blur passes (3x3, separable-ish)
+        for (int pass = 0; pass < 2; pass++) {
+            for (int y = 0; y < bh; y++) for (int x = 0; x < bw; x++) {
+                int rr = 0, gg = 0, bb = 0, n = 0;
+                for (int j = -1; j <= 1; j++) { int yy = y + j; if (yy < 0 || yy >= bh) continue;
+                    for (int i = -1; i <= 1; i++) { int xx = x + i; if (xx < 0 || xx >= bw) continue; int c = blm[yy * bw + xx]; rr += (c >> 16) & 255; gg += (c >> 8) & 255; bb += c & 255; n++; } }
+                blm2[y * bw + x] = ((rr / n) << 16) | ((gg / n) << 8) | (bb / n);
+            }
+            int[] t = blm; blm = blm2; blm2 = t;
+        }
+        boolean trails = trail != null && trail.length == scr.length;
+        if (!trails) trail = new int[scr.length];
+        for (int y = 0; y < H; y++) {
+            int by = (y >> 2) < bh ? (y >> 2) : bh - 1, o = y * W;
+            for (int x = 0; x < W; x++) {
+                int c = scr[o + x], b = blm[by * bw + ((x >> 2) < bw ? (x >> 2) : bw - 1)];
+                int r0 = ((c >> 16) & 255) * 270 >> 8, g0 = ((c >> 8) & 255) * 252 >> 8, b0 = (c & 255) * 222 >> 8;   // warm
+                r0 += ((b >> 16) & 255); g0 += ((b >> 8) & 255); b0 += (b & 255);                                // bloom
+                if (trails) { int t = trail[o + x]; r0 = (r0 * 5 + ((t >> 16) & 255) * 3) >> 3; g0 = (g0 * 5 + ((t >> 8) & 255) * 3) >> 3; b0 = (b0 * 5 + (t & 255) * 3) >> 3; }
+                if (r0 > 255) r0 = 255; if (g0 > 255) g0 = 255; if (b0 > 255) b0 = 255;
+                int out = (r0 << 16) | (g0 << 8) | b0;
+                scr[o + x] = out; trail[o + x] = out;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ touch buttons (legacy build on touch phones)
+    static final int[] TB_ACT = { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_FIRE, A_ENTER, A_HAND, A_SPRINT, A_WEAP, A_PAUSE, A_CAML, A_CAMR };
+    static final String[] TB_LBL = { "^", "v", "<", ">", "fire", "car", "jump", "run", "wpn", "||", "(", ")" };
+    int[] tbX = new int[12], tbY = new int[12];
+    int tbS, touchAct;
+    boolean legacyTouch() { return legacy && hasPointerEvents(); }
+    void layoutTouch() {
+        int s = Math.max(28, Math.min(W, H) / 7); tbS = s;
+        int bx = s / 2 + 4, by = H - s * 2 - 6;
+        tbX[0] = bx + s; tbY[0] = by; tbX[1] = bx + s; tbY[1] = by + s * 2; tbX[2] = bx; tbY[2] = by + s; tbX[3] = bx + s * 2; tbY[3] = by + s;
+        int rx2 = W - s - 6;
+        tbX[4] = rx2; tbY[4] = H - s - 6; tbX[5] = rx2; tbY[5] = H - s * 2 - 12; tbX[6] = rx2 - s - 6; tbY[6] = H - s - 6;
+        tbX[7] = rx2 - s - 6; tbY[7] = H - s * 2 - 12; tbX[8] = rx2; tbY[8] = H - s * 3 - 18; tbX[9] = W - s / 2 - 4; tbY[9] = s / 2 + 4;
+        tbX[10] = W / 2 - s; tbY[10] = H - s / 2 - 4; tbX[11] = W / 2 + s; tbY[11] = H - s / 2 - 4;
+    }
+    void drawTouch() {
+        if (tbS == 0) layoutTouch();
+        for (int i = 0; i < 12; i++) {
+            int s = i >= 10 ? tbS * 2 / 3 : tbS;
+            Ui.fillA(scr, W, H, tbX[i] - s / 2, tbY[i] - s / 2, s, s, (down & TB_ACT[i]) != 0 ? 0xFF90E0 : 0xFFFFFF, 60);
+            Ui.textC(scr, W, H, tbX[i], tbY[i] - 6, TB_LBL[i], 0xFFFFFF, 1);
+        }
+    }
+    int touchAt(int x, int y) {
+        if (tbS == 0) layoutTouch();
+        for (int i = 0; i < 12; i++) { int s = i >= 10 ? tbS * 2 / 3 : tbS; if (Math.abs(x - tbX[i]) <= s / 2 + 4 && Math.abs(y - tbY[i]) <= s / 2 + 4) return TB_ACT[i]; }
+        return 0;
+    }
+    protected void pointerPressed(int x, int y) {
+        anyKey++;
+        if (state != S_PLAY) { press(A_FIRE); touchAct = A_FIRE; return; }
+        touchAct = touchAt(x, y);
+        if (touchAct == A_SPRINT) sprintPress = (int) System.currentTimeMillis();
+        press(touchAct);
+    }
+    protected void pointerDragged(int x, int y) {
+        int a = state == S_PLAY ? touchAt(x, y) : touchAct;
+        if (a != touchAct) { down &= ~touchAct; touchAct = a; press(a); }
+    }
+    protected void pointerReleased(int x, int y) {
+        if (touchAct == A_SPRINT && sprintPress > 0 && (int) System.currentTimeMillis() - sprintPress < 350) edges |= A_TAPRUN;
+        down &= ~touchAct; touchAct = 0;
     }
 
     void overlay() {
@@ -443,7 +601,7 @@ public final class Game extends Canvas implements Runnable {
         if (w.helpT > 0 && oSubs && w.help != null) Ui.helpBox(scr, W, H, u, w.help);
         if (titleMs < 4200) {
             int a = titleMs < 600 ? titleMs * 255 / 600 : (titleMs > 3400 ? (4200 - titleMs) * 255 / 800 : 255);
-            String z = "Washington Beach";
+            String z = legacy ? "Ocean Beach" : "Washington Beach";
             int tw = Ui.textW(z, u * 2);
             for (int i = 0; i < z.length(); i++) { }
             if (a > 120) Ui.text(scr, W, H, W - 8 * u - tw, H - 28 * u, z, 0x28D890, u * 2);

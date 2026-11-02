@@ -22,9 +22,9 @@ final class Ui {
             case 3: hud = Assets.imgPix("/hud.png", dm); break;
             case 4: logo = Assets.imgPix("/logo.png", dm); logoW = dm[0]; logoH = dm[1]; break;
             case 5: bg = Assets.imgPix("/menu_bg.png", dm); bgW = dm[0]; bgH = dm[1]; loadRadar(); break;
-            case 6: scr[2] = Assets.imgPix("/ls1.png", dm); break;
-            case 7: scr[3] = Assets.imgPix("/ls2.png", dm); break;
-            case 8: scr[4] = Assets.imgPix("/ls3.png", dm); break;
+            case 6: try { scr[2] = Assets.imgPix("/ls1.png", dm); } catch (IOException e) { } break;
+            case 7: try { scr[3] = Assets.imgPix("/ls2.png", dm); } catch (IOException e) { } break;
+            case 8: try { scr[4] = Assets.imgPix("/ls3.png", dm); } catch (IOException e) { } break;
             default: break;
         }
     }

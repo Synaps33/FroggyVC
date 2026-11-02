@@ -3,9 +3,11 @@ import javax.microedition.lcdui.*;
 
 /** Resources + the renderer texture cache (512 slots, reference counted, loaded on demand). */
 final class Assets {
-    static final int SLOTS = 512;
-    static String[] slotName = new String[SLOTS];
-    static int[] slotRef = new int[SLOTS], slotUse = new int[SLOTS];
+    static int SLOTS = 1024;
+    static String[] slotName = new String[1024];
+    static int[] slotRef = new int[1024], slotUse = new int[1024];
+    static boolean legacy = open("/legacy.txt") != null;
+    static { if (legacy) SLOTS = 360; }
     static int useClock;
     static R3D r;
 

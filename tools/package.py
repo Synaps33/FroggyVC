@@ -29,6 +29,73 @@ manifest = '\r\n'.join([
     'Created-By: 1.3 (preverified)', '', ''])
 
 res = os.path.join(P, 'res')
+LEGACY = os.environ.get('LEGACY') == '1'
+if LEGACY:
+    import io
+    from PIL import Image
+    NAME = os.environ.get('JAR_NAME', 'GTA_VC_J2ME_legacy')
+    resL = os.path.join(P, 'res_legacy')
+    CARS = ['police', 'admiral', 'taxi', 'pcj600']
+    PEDS = ['player', 'cop', 'hmyst', 'wfyst', 'wmybe']
+    VOICES = ['v_mpanic0', 'v_fpanic0', 'v_mdeath0', 'v_fdeath0', 'v_fight0', 'v_chat0', 'v_tommy0']
+    def small_png(path, size):
+        im = Image.open(path); im = im.convert('RGBA' if im.mode in ('RGBA', 'LA', 'P') else 'RGB')
+        im = im.resize((min(size, im.size[0]), min(size, im.size[1])), Image.LANCZOS)
+        b = io.BytesIO(); im.save(b, 'PNG', optimize=True); return b.getvalue()
+    def car_tex(name):
+        d = open(os.path.join(res, 'car_%s.bin' % name), 'rb').read(); n = d[4]; p = 5; out = []
+        for _ in range(n): l = d[p]; out.append(d[p + 1:p + 1 + l].decode()); p += 1 + l
+        return out
+    def wtex(name):
+        d = open(os.path.join(res, name), 'rb').read(); n = d[0]; p = 1; out = []
+        for _ in range(n): l = d[p]; out.append(d[p + 1:p + 1 + l].decode()); p += 1 + l
+        return out
+    manifest = manifest.replace('MIDlet-Description: Vice City open world port', 'MIDlet-Description: Vice City legacy (Ocean Drive)')
+    jar = os.path.join(OUT, NAME + '.jar')
+    tilesL = sorted(os.listdir(os.path.join(resL, 't')))
+    usedL = set()
+    for f in tilesL:
+        d = open(os.path.join(resL, 't', f), 'rb').read(); n = struct.unpack_from('>H', d, 2)[0]
+        usedL.update(struct.unpack_from('>%dH' % n, d, 4))
+    texs = set(['wheel_saloon64', 'tyre64a', 'blood'])
+    for c in CARS: texs.update(car_tex(c))
+    for w in ('w_bat.bin', 'w_colt45.bin'): texs.update(wtex(w))
+    with zipfile.ZipFile(jar, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        z.writestr('META-INF/MANIFEST.MF', manifest)
+        cl = os.path.join(P, 'build', 'cldc')
+        for f in sorted(os.listdir(cl)):
+            if f.endswith('.class'): z.write(os.path.join(cl, f), f)
+        z.writestr('legacy.txt', 'ocean drive\n')
+        z.writestr('cars.lst', '\n'.join(CARS) + '\n')
+        pl = [l for l in open(os.path.join(res, 'peds.lst')).read().split('\n') if l.split(' ')[0] in PEDS]
+        z.writestr('peds.lst', '\n'.join(pl) + '\n')
+        for f in sorted(os.listdir(res)):
+            fp = os.path.join(res, f)
+            if os.path.isdir(fp) or f in ('peds.lst', 'cars.lst', 'mapidx.bin') or f.endswith('.3gp'): continue
+            if f.startswith('car_') and f[4:-4] not in CARS: continue
+            if f.startswith('p_') and f[2:-4].replace('_lo', '') not in PEDS: continue
+            if f.startswith('t_p_'):
+                if f[4:-4] in PEDS: z.writestr(f, small_png(fp, 32))
+                continue
+            if f.startswith('t_'):
+                if f[2:-4] in texs: z.writestr(f, small_png(fp, 32))
+                continue
+            if f.startswith('v_') and f[:-4] not in VOICES: continue
+            if f in ('ls1.png', 'ls2.png', 'ls3.png'): continue
+            if f == 'radar.png': z.writestr(f, small_png(fp, 224)); continue
+            if f == 'radar.txt':
+                ax, az, cell = [int(v) for v in open(fp).read().split()]
+                w0 = Image.open(os.path.join(res, 'radar.png')).size[0]
+                z.writestr(f, '%d %d %d\n' % (ax, az, cell * w0 // min(224, w0))); continue
+            z.write(fp, f)
+        z.write(os.path.join(resL, 'mapidx.bin'), 'mapidx.bin')
+        for f in tilesL: z.write(os.path.join(resL, 't', f), 't/' + f)
+        for t in sorted(usedL): z.write(os.path.join(res, 'x', '%d.png' % t), 'x/%d.png' % t, compress_type=zipfile.ZIP_STORED)
+    size = os.path.getsize(jar)
+    jad = manifest.rstrip('\r\n').split('\r\n') + ['MIDlet-Jar-URL: ' + NAME + '.jar', 'MIDlet-Jar-Size: %d' % size]
+    open(os.path.join(OUT, NAME + '.jad'), 'w', newline='').write('\r\n'.join(jad) + '\r\n')
+    print('legacy jar', jar, size, 'bytes,', len(tilesL), 'tiles,', len(usedL), 'map textures')
+    sys.exit(0)
 tiles = sorted(os.listdir(os.path.join(res, 't'))) if os.path.isdir(os.path.join(res, 't')) else []
 if REGION:
     i0, j0, i1, j1 = [int(v) for v in REGION.split(',')]

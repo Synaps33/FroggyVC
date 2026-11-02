@@ -15,7 +15,8 @@ final class World implements Runnable {
     int lampX, lampY, lampZ;
     Mesh beam, blood;
     static final int S_WATER = 0, S_SAND = 1, S_GRASS = 2, S_PAVE = 3, S_ROAD = 4, S_ROCK = 5;
-    static final int RING = 3;
+    static final boolean LEGACY = Assets.legacy;
+    static final int RING = LEGACY ? 1 : 2;
     private final int[] reqQ = new int[64];
     private int reqN;
     private final Tile[] readyQ = new Tile[16];
@@ -136,7 +137,7 @@ final class World implements Runnable {
         int k = (gj % Tile.NH) * Tile.NH + (gi % Tile.NH);
         int a = t.top[k];
         if (a == -32768) return -640;
-        if (a > y + 80) { int b = t.low[k]; return b == -32768 ? -640 : b; }
+        if (a > y + 140) { int b = t.low[k]; return b == -32768 ? -640 : b; }
         return a;
     }
     /** ground height (1/64 m) for something currently at height y: the top layer unless it is overhead (bridges) */
@@ -144,8 +145,13 @@ final class World implements Runnable {
         int fx = (int) (((long) (xm - mox - 1024) << 8) / 2048), fz = (int) (((long) (zm - moz - 1024) << 8) / 2048);
         int i = fx >> 8, j = fz >> 8, ax = fx & 255, az = fz & 255;
         int h00 = hCell(i, j, y), h10 = hCell(i + 1, j, y), h01 = hCell(i, j + 1, y), h11 = hCell(i + 1, j + 1, y);
+        if (h00 == -640 || h10 == -640 || h01 == -640 || h11 == -640) {         // fill holes from the neighbours
+            int v = Math.max(Math.max(h00, h10), Math.max(h01, h11));
+            if (v == -640) return -640;
+            if (h00 == -640) h00 = v; if (h10 == -640) h10 = v; if (h01 == -640) h01 = v; if (h11 == -640) h11 = v;
+        }
         int mn = Math.min(Math.min(h00, h10), Math.min(h01, h11)), mx = Math.max(Math.max(h00, h10), Math.max(h01, h11));
-        if (mx - mn > 40) return ax < 128 ? (az < 128 ? h00 : h01) : (az < 128 ? h10 : h11);   // kerbs/walls: no blending across steps
+        if (mx - mn > 96) return ax < 128 ? (az < 128 ? h00 : h01) : (az < 128 ? h10 : h11);   // kerbs/walls: no blending across steps
         int a = h00 + (((h10 - h00) * ax) >> 8), b = h01 + (((h11 - h01) * ax) >> 8);
         return a + (((b - a) * az) >> 8);
     }
@@ -216,7 +222,8 @@ final class World implements Runnable {
     static final int K_UP = 1, K_DOWN = 2, K_LEFT = 4, K_RIGHT = 8, K_FIRE = 16, K_CAML = 32, K_CAMR = 64, K_CAMU = 128,
             K_CAMD = 256, K_SPRINT = 512, K_HAND = 1024;
     static final int PA_NONE = 0, PA_WALKTO = 1, PA_GETIN = 2, PA_GETOUT = 3;
-    static final int NPOOL = 12, NCPOOL = 10;
+    static final int NPOOL = LEGACY ? 5 : 12, NCPOOL = LEGACY ? 4 : 10;
+    static final int MAXPED = LEGACY ? 10 : 22, MAXTRAFFIC = LEGACY ? 3 : 8;
 
     String[] pedNames; int[] pedFlags;
     PedModel pm0; int playerTex;
@@ -239,7 +246,7 @@ final class World implements Runnable {
         loadPed(0, find(pedNames, "cop"));
         for (int i = 1; i < NPOOL; i++) loadPed(i, randomAmbient());
         loadCar(0, find(carNames, "police"));
-        String[] start = { "taxi", "admiral", "pcj600", "stallion", "cheetah", "sentinel", "faggio", "pony", "voodoo" };
+        String[] start = { "admiral", "taxi", "pcj600", "stallion", "cheetah", "sentinel", "faggio", "pony", "voodoo" };
         for (int i = 1; i < NCPOOL; i++) loadCar(i, find(carNames, start[i - 1]));
         weaponMesh[1] = loadWeapon("bat");
         weaponMesh[2] = loadWeapon("colt45");
@@ -288,13 +295,13 @@ final class World implements Runnable {
         else if (HEAVY.indexOf(k) >= 0) { mv = 130; ac = 15; lk = 30; mass = 3500; grip = 85; cls = 2; }
         else if (SLOW.indexOf(k) >= 0) { mv = 60; ac = 12; lk = 40; mass = 500; grip = 110; cls = 4; }
         if (m.name.equals("police") || m.name.equals("fbicar")) { mv = 190; ac = 26; }
-        m.vmax = mv * 10 / 36; m.accel = ac * 20; m.brake = 1100; m.lockDeg = lk; m.mass = mass; m.grip = grip; m.cls = cls;
+        m.vmax = mv * 11 / 36; m.accel = ac * 30; m.brake = 1100; m.lockDeg = lk; m.mass = mass; m.grip = grip; m.cls = cls;
         // real values from handling.cfg when the vehicle is listed there
         for (int i = 0; i < hdl.length; i++) {
             if (!hdl[i].startsWith(m.name + " ")) continue;
             int[] v = new int[6]; int p = m.name.length() + 1;
             for (int f = 0; f < 6; f++) { int q = hdl[i].indexOf(' ', p); if (q < 0) q = hdl[i].length(); v[f] = Integer.parseInt(hdl[i].substring(p, q).trim()); p = q + 1; }
-            m.mass = v[0]; m.grip = v[1]; m.vmax = v[2] * 10 / 36; m.accel = v[3] * 2; m.brake = v[4]; m.lockDeg = v[5];
+            m.mass = v[0]; m.grip = Math.max(95, v[1]); m.vmax = v[2] * 11 / 36; m.accel = v[3] * 3; m.brake = v[4] + 200; m.lockDeg = v[5];
             break;
         }
         m.wheelbase = m.dimZ * 16 * 6 / 10;
@@ -322,7 +329,7 @@ final class World implements Runnable {
     // ================================================================== state
     byte[] tc;
     int cIdle, cWalk, cWalkB, cRun, cCiviWalk, cCiviRun, cWomanWalk, cWomanRun, cWomanIdle, cPunch, cJab, cHeavy,
-            cHitF, cHitB, cKoF, cKoB, cGetup, cOpen, cGetin, cGetout, cPull, cJacked, cSit, cSprint;
+            cHitF, cHitB, cKoF, cKoB, cGetup, cOpen, cGetin, cGetout, cPull, cJacked, cSit, cSprint, cJumpL, cJumpG, cJumpLand;
 
     Ped player;
     Car inCar, pActCar;
@@ -345,12 +352,16 @@ final class World implements Runnable {
     int time;
     int rx, rz;
     int shake;
-    boolean runMode;
+    boolean runMode, god, jumpReq;
+    int speedMul = 100, sprintHeld, voiceCd;
+    Ped target;
     int weapon;                      // 0 fists, 1 bat, 2 pistol
     boolean hasBat, hasPistol;
     int ammo, shotCd, aimT, flashT;
-    int npick;
-    int[] pkX = new int[8], pkZ = new int[8], pkY = new int[8], pkType = new int[8], pkT = new int[8];
+    int npick, saveT;
+    static final int NPK = 24;
+    int[] pkX = new int[NPK], pkZ = new int[NPK], pkY = new int[NPK], pkType = new int[NPK], pkT = new int[NPK], pkAmt = new int[NPK], pkLife = new int[NPK];
+    Mesh cashMesh;
     private final int[] pose = new int[93], pose2 = new int[93];
 
     void initClips() {
@@ -363,6 +374,7 @@ final class World implements Runnable {
         cGetup = AnimData.find("getup"); cOpen = AnimData.find("CAR_open_LHS");
         cGetin = AnimData.find("CAR_getin_LHS"); cGetout = AnimData.find("CAR_getout_LHS"); cPull = AnimData.find("CAR_pullout_LHS");
         cJacked = AnimData.find("CAR_jackedLHS"); cSit = AnimData.find("CAR_sit");
+        cJumpL = AnimData.find("JUMP_launch"); cJumpG = AnimData.find("JUMP_glide"); cJumpLand = AnimData.find("JUMP_land");
     }
 
     void assignKind(Ped p, int slot) { p.kind = slot; p.tex = poolTex[slot]; int f = pedFlags[poolSrc[slot]]; p.female = (f & 1) != 0; p.gang = (f & 4) != 0; }
@@ -397,15 +409,37 @@ final class World implements Runnable {
         npick = 0;
         addPickup(2, 2600, 1200);
         addPickup(1, -2200, 1800);
-        for (int i = 0; i < 7; i++) spawnTraffic(true);
-        for (int i = 0; i < 18; i++) spawnPed(true);
-        say("Welcome to Vice City.   0: walk / run   2 4 6 8: camera   3: switch weapon");
+        for (int i = 0; i < MAXTRAFFIC - 1; i++) spawnTraffic(true);
+        for (int i = 0; i < MAXPED - 4; i++) spawnPed(true);
+        say("Welcome to Vice City.   1: walk / run   0: jump   2 4 6 8: camera   3: switch weapon");
     }
     void addPickup(int type, int fwd, int side) {
         int fx = Fx.sin(player.yaw), fz = Fx.cos(player.yaw);
         rx = player.x + ((fx * fwd + fz * side) >> 14); rz = player.z + ((fz * fwd - fx * side) >> 14);
         if (!walkable(rx, rz, player.y)) { rx = player.x + ((fx * fwd) >> 14); rz = player.z + ((fz * fwd) >> 14); }
-        pkX[npick] = rx; pkZ[npick] = rz; pkY[npick] = groundH(rx, rz, player.y); pkType[npick] = type; pkT[npick] = 0; npick++;
+        pkX[npick] = rx; pkZ[npick] = rz; pkY[npick] = groundH(rx, rz, player.y); pkType[npick] = type; pkT[npick] = 0; pkLife[npick] = 0; npick++;
+    }
+    /** dropped by a dead ped / cop: disappears after 30 s */
+    void dropPickup(int type, int amt, int x, int z, int y) {
+        int k = -1;
+        for (int i = 0; i < npick; i++) if (pkLife[i] < 0) { k = i; break; }
+        if (k < 0) { if (npick >= NPK) return; k = npick++; }
+        pkX[k] = x; pkZ[k] = z; pkY[k] = groundH(x, z, y); pkType[k] = type; pkAmt[k] = amt; pkT[k] = 0; pkLife[k] = 30000;
+    }
+
+    /** continue: move Tommy (and his world) to the saved spot */
+    void continueAt(int x, int z, int y, int yaw) {
+        for (int k = 0; k < tiles.length; k++) if (tiles[k] != null) { tiles[k].unload(); tiles[k] = null; }
+        player.x = x; player.z = z; player.yaw = yaw & 1023;
+        preload(x, z);
+        int g = groundH(x, z, y);
+        player.y = g > -70 ? g : y;
+        camYaw = player.yaw;
+        ncars = 0; nped = 0; npick = 0;
+        for (int i = 0; i < MAXTRAFFIC - 1; i++) spawnTraffic(true);
+        for (int i = 0; i < MAXPED - 4; i++) spawnPed(true);
+        weapon = hasPistol && ammo > 0 ? 2 : (hasBat ? 1 : 0);
+        say("Welcome back.");
     }
 
     void placePlayerAtSpawn() {
@@ -545,7 +579,9 @@ final class World implements Runnable {
     }
 
     // ------------------------------------------------------------------ update
-    void update(int dt, int keys, boolean fire, boolean enter, boolean toggleRun, boolean nextWeapon) {
+    void update(int dt, int keys, boolean fire, boolean enter, boolean toggleRun, boolean nextWeapon, boolean jump) {
+        jumpReq = jump;
+        if (voiceCd > 0) voiceCd -= dt;
         if (dt > 100) dt = 100;
         time += dt;
         clockMs += dt;
@@ -583,6 +619,8 @@ final class World implements Runnable {
             if (drownT > 1500) { health = 0; wastedT = 0; say("Tommy can't swim!"); }
         } else drownT = 0;
         updatePickups(dt);
+        saveT += dt;
+        if (saveT > 20000 && pAct == 0) { saveT = 0; Save.write(this); }
         updateWorld(dt);
         updateCamera(dt, keys);
         updateWanted(dt);
@@ -601,13 +639,16 @@ final class World implements Runnable {
     }
     void updatePickups(int dt) {
         for (int i = 0; i < npick; i++) {
+            if (pkLife[i] < 0) continue;                                        // free slot
+            if (pkLife[i] > 0) { pkLife[i] -= dt; if (pkLife[i] <= 0) { pkLife[i] = -1; continue; } }
             if (pkT[i] > 0) { pkT[i] -= dt; continue; }
             if (inCar == null && Fx.dist(pkX[i] - player.x, pkZ[i] - player.z) < 1200) {
-                if (pkType[i] == 2) { hasPistol = true; ammo += 68; weapon = 2; say("Pistol - hold fire to shoot, it locks on to the nearest person"); }
-                else { hasBat = true; weapon = 1; say("Baseball bat"); }
-                helpT = 2500;
+                if (pkType[i] == 3) { money += pkAmt[i]; say("$" + pkAmt[i]); }
+                else if (pkType[i] == 2) { hasPistol = true; ammo += pkLife[i] > 0 ? 17 : 68; if (weapon == 0) weapon = 2; say("Pistol  (" + ammo + ")"); }
+                else { hasBat = true; if (weapon == 0) weapon = 1; say("Baseball bat"); }
+                helpT = 1500;
                 Snd.play(Snd.PICKUP);
-                pkT[i] = 30000;
+                if (pkLife[i] > 0) pkLife[i] = -1; else pkT[i] = 30000;
             }
         }
     }
@@ -713,41 +754,65 @@ final class World implements Runnable {
         }
     }
 
+    boolean isAttack(int c) { return c == cJab || c == cPunch || c == cHeavy; }
+
+    /** On foot: speed eases to walk 2 / run 6.2 / sprint 8.8 m/s (VC-like), climbs steps up to ~1.1 m, jumps with gravity. */
     void updateOnFoot(int dt, int keys, boolean fire) {
         Ped p = player;
-        if (p.clip >= 0) {
+        if (p.clip >= 0 && isAttack(p.clip)) {
             stepClip(p, dt);
-            if (p.clip >= 0 && !p.hitDone && p.clipT >= (p.clip == cHeavy ? 330 : 170)) {
+            if (p.clip >= 0 && !p.hitDone && p.clipT >= 170) {
                 p.hitDone = true;
-                doPunch(weapon == 1 ? 55 : (p.clip == cHeavy ? 45 : 28), weapon == 1 ? 2200 : 1700);
+                doPunch(weapon == 1 ? 55 : (combo == 3 ? 45 : 28), weapon == 1 ? 2200 : 1700);
             }
             p.speed = 0;
             return;
         }
+        if (p.clip >= 0) stepClip(p, dt);
         int turn = 0, move = 0;
         if ((keys & K_LEFT) != 0) turn -= 1;
         if ((keys & K_RIGHT) != 0) turn += 1;
         if ((keys & K_UP) != 0) move += 1;
         if ((keys & K_DOWN) != 0) move -= 1;
-        p.yaw = (p.yaw + turn * 820 * dt / 1000) & 1023;
-        int sp = 0;
-        boolean sprint = (keys & K_SPRINT) != 0;
-        if (move > 0) sp = sprint ? 6600 : (runMode ? 4800 : 1700);
-        else if (move < 0) sp = runMode ? -2600 : -1700;
-        if (weapon == 2 && hasPistol) {
-            if ((keys & K_FIRE) != 0) { aimT = 900; shoot(); }
-        } else if (fire) {
-            if (weapon == 1) { startClip(p, cHeavy, -1, 0); Snd.play(Snd.SWING); return; }
+        if ((keys & K_SPRINT) != 0) sprintHeld += dt; else sprintHeld = 0;
+        boolean sprint = sprintHeld > 350;
+        int tr = Fx.abs(p.speed) > 4000 ? 640 : 860;
+        if (!p.air) p.yaw = (p.yaw + turn * tr * dt / 1000) & 1023;
+        int want = 0;
+        if (move > 0) want = sprint ? 8800 : (runMode ? 6200 : 2000);
+        else if (move < 0) want = runMode ? -3000 : -2000;
+        want = want * speedMul / 100;
+        boolean pistol = weapon == 2 && hasPistol;
+        if (pistol && (keys & K_FIRE) != 0) {
+            aimT = 900;
+            lockOn();
+            shoot();
+            if (want > 2000) want = 2000;
+        } else if (!pistol && fire && !p.air) {
+            if (weapon == 1) { startClip(p, cPunch, -1, 0); Snd.play(Snd.SWING); return; }
             combo = combo % 3 + 1;
-            if (combo == 1) startClip(p, cJab, -1, 560); else if (combo == 2) startClip(p, cPunch, -1, 0); else startClip(p, cHeavy, -1, 0);
+            if (combo == 1) startClip(p, cJab, -1, 560); else if (combo == 2) startClip(p, cPunch, -1, 0); else startClip(p, cJab, -1, 700);
+            if (Fx.rnd(4) == 0) voice(Snd.V_TOMMY, p);
             return;
         }
-        if (aimT > 0 && sp > 1700) sp = 1700;
-        p.speed = sp;
+        if ((keys & K_FIRE) == 0 && aimT <= 0) target = null;
+        if (!p.air) {
+            int accel = (want == 0 || (want > 0) != (p.speed > 0)) ? 18000 : 11000;
+            int d = want - p.speed, stp = accel * dt / 1000;
+            p.speed += d > stp ? stp : (d < -stp ? -stp : d);
+            if (jumpReq && p.clip < 0) { p.air = true; p.vy = 300; startClip(p, cJumpL, -1, 0); }
+        }
+        int sp = p.speed;
         rx = p.x + ((Fx.sin(p.yaw) * sp) >> 14) * dt / 1000;
         rz = p.z + ((Fx.cos(p.yaw) * sp) >> 14) * dt / 1000;
         resolve(300);
-        stepOk(p.x, p.z, p.y, 60);
+        int gCur = p.air ? p.y : groundH(p.x, p.z, p.y);
+        int ox = p.x, oz = p.z, lim = p.air ? 20 : 72;
+        if (groundH(rx, rz, gCur + 40) - gCur > lim) {          // higher than a step: slide along it
+            int nx = rx, nz = rz;
+            rz = oz;
+            if (groundH(rx, rz, gCur + 40) - gCur > lim) { rx = ox; rz = nz; if (groundH(rx, rz, gCur + 40) - gCur > lim) { rx = ox; rz = oz; } }
+        }
         for (int i = 0; i < ncars; i++) {
             Car c = cars[i];
             CarModel m = cm(c);
@@ -757,16 +822,67 @@ final class World implements Runnable {
                 int cx = c.x + ((Fx.sin(c.yaw) * k * half) >> 14), cz = c.z + ((Fx.cos(c.yaw) * k * half) >> 14);
                 int dx = rx - cx, dz = rz - cz;
                 if (dx > rr || dx < -rr || dz > rr || dz < -rr) continue;
-                int d = Fx.dist(dx, dz);
-                if (d < rr && d > 0) { rx = cx + dx * rr / d; rz = cz + dz * rr / d; }
+                int dd = Fx.dist(dx, dz);
+                if (dd < rr && dd > 0) { rx = cx + dx * rr / dd; rz = cz + dz * rr / dd; }
             }
         }
         int mv = Fx.dist(rx - p.x, rz - p.z);
         p.x = rx; p.z = rz;
-        selectLoco(p, dt, mv == 0 && sp != 0 ? sp / 6 : sp);
-        int gy = groundH(p.x, p.z, p.y);
-        if (gy < p.y - 4) p.y += Math.max(gy - p.y, -(4 + 600 * dt / 1000));
+        int gy = groundH(p.x, p.z, (p.air ? p.y : gCur) + 40);
+        if (p.air) {
+            p.vy -= 627 * dt / 1000;
+            p.y += p.vy * dt / 1000;
+            if (p.clip < 0) { p.loco = cJumpG; p.locoT += dt; }
+            if (p.y <= gy && p.vy <= 0) { p.y = gy; p.air = false; p.vy = 0; startClip(p, cJumpLand, -1, 250); }
+            return;
+        }
+        if (mv == 0 && sp != 0) p.speed = sp / 2;
+        if (p.clip < 0) selectLoco(p, dt, mv == 0 && sp != 0 ? sp / 6 : sp);
+        if (gy < p.y - 40) { p.air = true; p.vy = 0; }
         else p.y = gy;
+    }
+
+    /** VC auto-aim: keep the current target while alive, in range and roughly in front */
+    void lockOn() {
+        Ped p = player;
+        if (target != null && (target.state == Ped.DEAD || target.seat != null || Fx.dist(target.x - p.x, target.z - p.z) > 40000)) target = null;
+        if (target == null) {
+            int fx = Fx.sin(p.yaw), fz = Fx.cos(p.yaw), bd = 36000;
+            for (int i = 0; i < nped; i++) {
+                Ped o = peds[i];
+                if (o.state == Ped.DEAD || o.seat != null) continue;
+                int dx = o.x - p.x, dz = o.z - p.z, d = Fx.dist(dx, dz);
+                if (d > bd || d < 1) continue;
+                if ((dx * fx + dz * fz) / 16384 < d * 70 / 100) continue;
+                bd = d; target = o;
+            }
+        }
+        if (target != null) p.yaw = Fx.yawOf(target.x - p.x, target.z - p.z);
+    }
+
+    void voice(int kind, Ped p) {
+        if (voiceCd > 0 || Fx.dist(p.x - player.x, p.z - player.z) > 25000) return;
+        voiceCd = 1800;
+        Snd.voice(kind, p.female);
+    }
+
+    /** debug menu: put any vehicle from the list in front of Tommy */
+    void debugSpawn(int src) {
+        try {
+            int slot = -1;
+            for (int s2 = NCPOOL - 1; s2 >= 1 && slot < 0; s2--) {
+                boolean used = false;
+                for (int i = 0; i < ncars; i++) if (cars[i].type == s2) used = true;
+                if (!used) slot = s2;
+            }
+            if (slot < 0) { for (int i = ncars - 1; i >= 0; i--) if (cars[i] != inCar && cars[i].type != 0) { slot = cars[i].type; break; } }
+            if (slot < 0) return;
+            for (int i = ncars - 1; i >= 0; i--) if (cars[i].type == slot && cars[i] != inCar) removeCar(i);
+            loadCar(slot, src);
+            int fx = Fx.sin(player.yaw), fz = Fx.cos(player.yaw);
+            Car c = addCar(Car.PARKED, slot, player.x + ((fx * 5000) >> 14), player.z + ((fz * 5000) >> 14), player.yaw + 256, Fx.rnd(10));
+            if (c != null) say(carNames[src]);
+        } catch (Exception e) { say("can't load " + carNames[src]); }
     }
 
     /** pistol: locks on to the nearest ped in front (VC auto-aim), flash + sound, scares the street */
@@ -774,16 +890,7 @@ final class World implements Runnable {
         if (shotCd > 0) return;
         if (ammo <= 0) { weapon = 0; say("Out of ammo"); return; }
         shotCd = 380; ammo--;
-        Ped p = player, best = null; int bd = 36000;
-        int fx = Fx.sin(p.yaw), fz = Fx.cos(p.yaw);
-        for (int i = 0; i < nped; i++) {
-            Ped o = peds[i];
-            if (o.state == Ped.DEAD || o.seat != null) continue;
-            int dx = o.x - p.x, dz = o.z - p.z, d = Fx.dist(dx, dz);
-            if (d > bd || d < 1) continue;
-            if ((dx * fx + dz * fz) / 16384 < d * 75 / 100) continue;
-            bd = d; best = o;
-        }
+        Ped p = player, best = target;
         Snd.play(Snd.GUN);
         flashT = 70;
         if (best != null) {
@@ -793,7 +900,7 @@ final class World implements Runnable {
         for (int i = 0; i < nped; i++) {
             Ped o = peds[i];
             if (o.cop || o.seat != null || o.state == Ped.DEAD || o.state == Ped.JACKED || o.angry) continue;
-            if (Fx.dist(o.x - p.x, o.z - p.z) < 30000 && o.clip < 0) { o.state = Ped.FLEE; o.timer = 5000; o.yaw = Fx.yawOf(o.x - p.x, o.z - p.z); }
+            if (Fx.dist(o.x - p.x, o.z - p.z) < 30000 && o.clip < 0) { if (o.state != Ped.FLEE) voice(Snd.V_PANIC, o); o.state = Ped.FLEE; o.timer = 5000; o.yaw = Fx.yawOf(o.x - p.x, o.z - p.z); }
         }
         if (copsNear(35 * 1024) > 0) raiseWanted(best != null && best.cop ? 2 : 1);
     }
@@ -826,11 +933,14 @@ final class World implements Runnable {
         boolean witnessed = byPlayer && copsNear(30 * 1024) > 0;
         if (o.hp <= 0) {
             o.state = Ped.DEAD; o.timer = 14000; o.deadT = 0; o.angry = false; o.aimT = 0;
+            voice(Snd.V_DEATH, o);
             int back = front ? -700 : 700;
             o.bloodX = o.x + ((Fx.sin(o.yaw) * back) >> 14); o.bloodZ = o.z + ((Fx.cos(o.yaw) * back) >> 14);
             o.bloodY = groundH(o.bloodX, o.bloodZ, o.y);
             startClip(o, front ? cKoF : cKoB, -2, 0);
-            if (!o.cop) o.cash = 10 + Fx.rnd(90);
+            o.cash = 0;
+            if (o.cop) dropPickup(2, 0, o.bloodX, o.bloodZ, o.y);                 // cops always drop their pistol
+            else if (Fx.rnd(100) < 55) dropPickup(3, 5 + Fx.rnd(60) + (o.gang ? 40 : 0), o.x + ((Fx.sin(o.yaw) * 400) >> 14), o.z + ((Fx.cos(o.yaw) * 400) >> 14), o.y);
             if (byPlayer) {
                 kills++;
                 if (o.cop) raiseWanted(wanted >= 1 ? 2 : 1);
@@ -840,6 +950,7 @@ final class World implements Runnable {
         } else {
             o.state = Ped.HIT;
             startClip(o, front ? cHitF : cHitB, -1, 0);
+            voice(o.brave ? Snd.V_FIGHT : Snd.V_PANIC, o);
             if (byPlayer) {
                 if (o.cop) raiseWanted(1); else if (witnessed) raiseWanted(1);
                 if (o.brave && !o.cop) o.angry = true;
@@ -848,7 +959,7 @@ final class World implements Runnable {
     }
 
     void hurt(int dmg) {
-        if (health <= 0 || dmg <= 0) return;
+        if (health <= 0 || dmg <= 0 || god) return;
         if (armor > 0) { armor -= dmg; if (armor < 0) { health += armor; armor = 0; } }
         else health -= dmg;
         if (health <= 0) { health = 0; wastedT = 0; }
@@ -888,7 +999,7 @@ final class World implements Runnable {
             if (vF > 400) { a = -br; c.braking = true; }
             else if (vF > -vmax / 3) a = -ac / 2;
         }
-        int drag = 250 + Fx.abs(vF) / 10 + (int) ((long) vF * vF / 1800000);
+        int drag = 150 + Fx.abs(vF) / 16 + (int) ((long) vF * vF / 2600000);
         if (acc == 0) drag += 800;
         if (hand) drag += br / 2;
         int stopA = (int) ((long) Fx.abs(vF) * 1000 / Math.max(dt, 1));
@@ -957,12 +1068,13 @@ final class World implements Runnable {
         }
     }
 
+    int dbgHit;
     void moveCar(Car c, int dt) {
         int ox = c.x, oz = c.z;
         int gHere = Math.max(c.y, groundH(c.x, c.z, c.y));
         c.x += c.vx * dt / 1000; c.z += c.vz * dt / 1000;
         CarModel m = cm(c);
-        int half = m.bike ? 500 : m.dimZ * 16 / 2 - 900, rad = m.bike ? 380 : m.dimX * 16 / 2 + 60;
+        int half = m.bike ? 500 : m.dimZ * 16 / 2 - 900, rad = m.bike ? 380 : m.dimX * 16 * 4 / 10;
         if (half < 200) half = 200;
         boolean hit = false;
         int nx = 0, nz = 0;
@@ -970,9 +1082,9 @@ final class World implements Runnable {
             int ox2 = (Fx.sin(c.yaw) * k * half) >> 14, oz2 = (Fx.cos(c.yaw) * k * half) >> 14;
             rx = c.x + ox2; rz = c.z + oz2;
             int bx = rx, bz = rz;
-            if (resolve(rad)) { hit = true; nx += rx - bx; nz += rz - bz; c.x = rx - ox2; c.z = rz - oz2; }
+            if (resolve(rad)) { dbgHit = 10 + k; hit = true; nx += rx - bx; nz += rz - bz; c.x = rx - ox2; c.z = rz - oz2; }
             int g = groundH(c.x + ox2, c.z + oz2, gHere);
-            if (g - gHere > 72 && g > -60) { hit = true; nx += ox - c.x; nz += oz - c.z; c.x = ox; c.z = oz; }   // > 1.1 m: a wall, not a kerb or ramp
+            if (g - gHere > 72 && g > -60 && groundH(c.x + ox2 * 12 / 10, c.z + oz2 * 12 / 10, gHere) - gHere > 72) { dbgHit = 20 + k + g * 100; hit = true; nx += ox - c.x; nz += oz - c.z; c.x = ox; c.z = oz; }   // > 1.1 m: a wall, not a kerb or ramp
         }
         if (hit) {
             int nl = Fx.dist(nx, nz);
@@ -1120,7 +1232,7 @@ final class World implements Runnable {
             if (c != inCar && c != pActCar && d > 150 * 1024) { removeCar(i); continue; }
             if (c.mode == Car.TRAFFIC) traffic++;
         }
-        if (traffic < 8 && (time % 1200) < dt) spawnTraffic(false);
+        if (traffic < MAXTRAFFIC && (time % 1200) < dt) spawnTraffic(false);
         for (int i = 0; i < nped; i++) updatePed(peds[i], dt);
         int alive = 0;
         for (int i = 0; i < nped; i++) {
@@ -1134,7 +1246,7 @@ final class World implements Runnable {
             if (p.state != Ped.DEAD && p.state != Ped.JACKED && p.state != Ped.GETUP && d > 100000) { p.state = Ped.DEAD; p.timer = 0; p.deadT = -1; }
             if (p.state != Ped.DEAD) alive++;
         }
-        if (alive < 22 && (time % 500) < dt) spawnPed(false);
+        if (alive < MAXPED && (time % 500) < dt) spawnPed(false);
     }
 
     /** right-hand lane follower on the road mask */
@@ -1229,7 +1341,6 @@ final class World implements Runnable {
         }
         if (p.state == Ped.DEAD) {
             if (p.timer > 0) p.timer -= dt;
-            if (p.cash > 0 && inCar == null && Fx.dist(p.x - player.x, p.z - player.z) < 1300) { money += p.cash; p.cash = 0; Snd.play(Snd.PICKUP); }
             return;
         }
         int sp;
@@ -1265,13 +1376,14 @@ final class World implements Runnable {
                     if (Fx.rnd(6) == 0) { p.state = Ped.IDLE; p.turnTimer = 1500 + Fx.rnd(2500); }
                 }
                 p.yaw = (p.yaw + Fx.clamp(Fx.angDiff(p.yaw, p.targetYaw), -300 * dt / 1000, 300 * dt / 1000)) & 1023;
+                if (dpl < 4000 && inCar == null && (time % 9000) < dt && Fx.rnd(2) == 0) voice(Snd.V_CHAT, p);
             }
             for (int i = 0; i < ncars; i++) {
                 Car c = cars[i];
                 if (Fx.abs(c.speed) < 2000) continue;
                 int dx = p.x - c.x, dz = p.z - c.z;
                 if (dx > 5000 || dx < -5000 || dz > 5000 || dz < -5000) continue;
-                if (p.state != Ped.FLEE && Fx.dist(dx, dz) < 4000) { p.state = Ped.FLEE; p.timer = 2200; p.yaw = Fx.yawOf(dx, dz); }
+                if (p.state != Ped.FLEE && Fx.dist(dx, dz) < 4000) { p.state = Ped.FLEE; p.timer = 2200; p.yaw = Fx.yawOf(dx, dz); if (Fx.rnd(3) == 0) voice(Snd.V_PANIC, p); }
             }
         }
         // look ahead: stay off water and walls, follow the pavement (rarely cross the road)
@@ -1374,6 +1486,7 @@ final class World implements Runnable {
         Sky.sunDir(this);
         if (Sky.sunY > 1500) { r.lx = Sky.sunX; r.ly = Sky.sunY; r.lz = Sky.sunZ; }
         else { r.lx = 5000; r.ly = 12000; r.lz = -6000; }
+        r.night = minutes < 6 * 60 + 30 || minutes >= 19 * 60 + 30;
         r.farZ = drawDist * 64;
         r.fogFar = r.farZ; r.fogNear = r.farZ * 35 / 100;
     }
@@ -1411,6 +1524,7 @@ final class World implements Runnable {
             drawPed(p);
         }
         drawPed(player);
+        if (target != null && aimT > 0 && target.state != Ped.DEAD) Sky.target(r, target.x >> 4, target.y + 70, target.z >> 4, target.hp, target.cop ? 160 : 100, time);
         drawPickups();
         drawParticles();
         for (int i = 0; i < ncars; i++) drawCar(cars[i], true);
@@ -1420,8 +1534,8 @@ final class World implements Runnable {
 
     void drawPickups() {
         for (int i = 0; i < npick; i++) {
-            if (pkT[i] > 0) continue;
-            Mesh m = weaponMesh[pkType[i]];
+            if (pkT[i] > 0 || pkLife[i] < 0) continue;
+            Mesh m = pkType[i] == 3 ? cashMesh() : weaponMesh[pkType[i]];
             if (m == null) continue;
             int dx = (pkX[i] >> 4) - r.camX, dy = pkY[i] + 40 + ((Fx.sin(time / 3) * 6) >> 14) - r.camY, dz = (pkZ[i] >> 4) - r.camZ;
             if (dx > 6000 || dx < -6000 || dz > 6000 || dz < -6000) continue;
@@ -1431,6 +1545,22 @@ final class World implements Runnable {
             int tx = (mv[0] * dx + mv[1] * dy + mv[2] * dz) >> 14, ty = (mv[3] * dx + mv[4] * dy + mv[5] * dz) >> 14, tz = (mv[6] * dx + mv[7] * dy + mv[8] * dz) >> 14;
             r.drawMesh(m, mmA, tx, ty, tz, 0, 16384, 0, 0);
         }
+    }
+
+    /** a small green bundle of notes */
+    Mesh cashMesh() {
+        if (cashMesh != null) return cashMesh;
+        Mesh m = new Mesh();
+        int a = 12, b = 4, c = 7;
+        m.nv = 8; m.x = new int[] { -a, a, a, -a, -a, a, a, -a }; m.y = new int[] { -b, -b, b, b, -b, -b, b, b }; m.z = new int[] { -c, -c, -c, -c, c, c, c, c };
+        m.u = new int[8]; m.v = new int[8];
+        int[] q = { 0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0 };
+        m.nt = 12; m.ti = q; m.tex = new short[12]; m.col = new int[12]; m.flag = new byte[12];
+        m.nx = new byte[12]; m.ny = new byte[12]; m.nz = new byte[12];
+        for (int i = 0; i < 12; i++) { m.tex[i] = -1; m.col[i] = i < 4 ? 0x3FA53F : 0x2E8B2E; m.flag[i] = (byte) (Mesh.F_DOUBLE | Mesh.F_EMISSIVE); }
+        m.bounds();
+        cashMesh = m;
+        return m;
     }
 
     void drawBlood(Ped p) {

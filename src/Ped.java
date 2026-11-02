@@ -17,5 +17,7 @@ final class Ped {
     int bloodX, bloodZ, bloodY;                     // blood pool position
     int closeT;
     boolean angry, brave, gang;                     // fights back
-    int aimT;                                       // cop aiming/shooting                                     // cop: time spent next to the player (arrest)
+    int aimT;
+    boolean air;
+    int vy;                                       // cop aiming/shooting                                     // cop: time spent next to the player (arrest)
 }

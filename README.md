@@ -27,6 +27,32 @@ To make a different region, change `MAP_REGION=i0,j0,i1,j1` in `.github/workflow
 
 On the E72 QWERTY keyboard, use **Fn** (or numeric lock) for the number keys.
 
+## Builds
+| JAR | for | content |
+|---|---|---|
+| `GTA_VC_J2ME.jar` | E72 / big S60 phones | the whole map (~36 MB) |
+| `GTA_VC_J2ME_lite.jar` | | Ocean Beach + Washington Beach |
+| `GTA_VC_J2ME_legacy.jar` | Asha 311 class (S40) | Ocean Drive around the Ocean View Hotel, 4 cars, 5 peds, no intro movie, half resolution. On touch screens it shows transparent buttons. |
+
+## Controls (new)
+* **1**: tap toggles walk/run, hold to sprint.
+* **0**: jump (handbrake in a car).
+* **5 held with the pistol**: lock-on with a PS2-style reticle (green → red with the target's health).
+* **0 + \***: debug/trainer menu. Spawn any vehicle from the list, set the time of day, Tommy speed, game speed, god mode, clear wanted level, weapons + money, teleport to spawn.
+* **Options → ps2 filter**: warm colour grade, bloom and motion trails.
+
+## Save / continue
+The game saves to the phone (RMS record store) every 20 s, and whenever you pause, quit or the phone interrupts it. It keeps your money, your last position (where your car was, if you were driving), the clock, and the bat/pistol and ammo. **Continue** appears at the top of the main menu once a save exists.
+
+## New in this build
+* Dead peds drop cash about half the time (gang members drop more), and dead cops always drop their pistol. Dropped pickups vanish after 30 s.
+* Ped and Tommy textures fixed (the UVs were flipped twice).
+* Starts at night (22:00) with the white Admiral parked next to Tommy.
+* Cars use the real `handling.cfg` values (mass, traction, top speed, acceleration, brakes, steering lock).
+* Cars no longer get stuck on bridge ramps and kerbs: only steps over 1.1 m count as walls.
+* Damage takes much longer. Panels dent and then fall off, the engine smokes when damaged, and at 0 HP it catches fire. About 5 s later it explodes: it kills you if you're still inside and hurts anyone close.
+* The radar and pause map use your VC map picture (auto-aligned to the world). No ped or car blips, only flashing cops while you're wanted.
+
 ## What's in it
 * **Full map**:
   * The 1.5 M-triangle Blender export is cut into 1,216 tiles of 100 m. They stream in on a background thread with a near and a far version of each tile, and textures load on demand into a 512-slot cache.

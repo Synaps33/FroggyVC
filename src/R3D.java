@@ -10,9 +10,9 @@ final class R3D {
     int[] fb, zb;
 
     // textures (ARGB, 0 = transparent)
-    int[][] T = new int[512][];
-    int[] uvs = new int[512];     // UV right-shift (ped meshes are authored for 128px atlases)
-    int[] tws = new int[512], twm = new int[512], thm = new int[512], tpu = new int[512], tpv = new int[512];
+    int[][] T = new int[1024][];
+    int[] uvs = new int[1024];     // UV right-shift (ped meshes are authored for 128px atlases)
+    int[] tws = new int[1024], twm = new int[1024], thm = new int[1024], tpu = new int[1024], tpv = new int[1024];
 
     // camera
     int camX, camY, camZ;
@@ -29,7 +29,8 @@ final class R3D {
     int animU, animV;
     int forceTex = -1;
     boolean blend;                 // translucent flat faces (glass): 50% blend, no depth write
-    boolean additive;              // additive flat faces (light beams): no depth write
+    boolean additive;
+    boolean night;                 // map faces flagged night-only / day-only (VC time objects)              // additive flat faces (light beams): no depth write
     int tint2 = 0xFFFFFF;          // secondary car colour
 
     // scratch
@@ -137,6 +138,8 @@ final class R3D {
             int z0 = vz[i0], z1 = vz[i1], z2 = vz[i2];
             if (z0 < NEAR && z1 < NEAR && z2 < NEAR) continue;
             int fl = m.flag[t];
+            if ((fl & 8) != 0 && !night) continue;
+            if ((fl & 0x80) != 0 && night) continue;
             // far reject
             if (z0 > farZ && z1 > farZ && z2 > farZ) continue;
             boolean inside = z0 >= NEAR && z1 >= NEAR && z2 >= NEAR;
@@ -200,7 +203,7 @@ final class R3D {
             }
             int fcol = 0;
             tintC = 0;
-            if (tid >= 0 && (fl & (Mesh.F_TINT | Mesh.F_TINT2)) != 0) { tintC = (fl & Mesh.F_TINT) != 0 ? body : tint2; tintC |= 0x1000000; }
+            if (tid >= 0 && (fl & (Mesh.F_TINT | Mesh.F_TINT2)) != 0) { tintC = (fl & Mesh.F_TINT) != 0 ? (body != 0 ? body : m.col[t]) : tint2; tintC |= 0x1000000; }
             if (tid < 0) {
                 int c = m.col[t];
                 if ((c & Mesh.BODY) != 0) c = body;

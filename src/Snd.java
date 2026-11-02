@@ -13,6 +13,16 @@ final class Snd implements Runnable {
     static boolean on = true, ok;
     static int engineState = -1;
     static boolean sirenOn;
+    // ped / Tommy voices (one at a time, like VC's ped comments)
+    static final int V_PANIC = 0, V_DEATH = 1, V_FIGHT = 2, V_CHAT = 3, V_TOMMY = 4;
+    static final String[][] VOICE = { { "v_mpanic0", "v_mpanic1", "v_mpanic2" }, { "v_mdeath0", "v_mdeath1" }, { "v_fight0", "v_fight1" },
+            { "v_chat0", "v_chat1", "v_chat2" }, { "v_tommy0", "v_tommy1" } };
+    static final String[][] VOICE_F = { { "v_fpanic0", "v_fpanic1", "v_fpanic2" }, { "v_fdeath0", "v_fdeath1" }, { "v_fight0", "v_fight1" },
+            { "v_chat0", "v_chat1", "v_chat2" }, { "v_tommy0", "v_tommy1" } };
+    static Player voicePl;
+    static String pendingVoice;
+    static int wantEngine = -1;
+    static long wantSince;
     private static final int[] queue = new int[16];
     private static int qn;
     private static final int[] qvol = new int[16];
@@ -63,6 +73,7 @@ final class Snd implements Runnable {
                 if (qn > 0) { id = queue[0]; vol = qvol[0]; qn--; System.arraycopy(queue, 1, queue, 0, qn); System.arraycopy(qvol, 1, qvol, 0, qn); }
             }
             if (id < 0) continue;
+            if (id == 300) { playVoice(); continue; }
             try {
                 if (id >= 100) { Player p = get(id - 100); if (p != null) p.stop(); continue; }
                 Player p = get(id);
@@ -75,15 +86,40 @@ final class Snd implements Runnable {
         }
     }
 
+    private static void playVoice() {
+        String n;
+        synchronized (queue) { n = pendingVoice; pendingVoice = null; }
+        if (n == null) return;
+        try {
+            if (voicePl != null) {
+                if (voicePl.getState() == Player.STARTED) return;            // still talking
+                voicePl.close(); voicePl = null;
+            }
+            byte[] d = Assets.readAll("/" + n + ".wav");
+            voicePl = Manager.createPlayer(new ByteArrayInputStream(d), "audio/x-wav");
+            voicePl.realize();
+            voicePl.start();
+        } catch (Throwable t) { voicePl = null; }
+    }
+
     private static void stop(int id) {
         if (!ok) return;
         synchronized (queue) { if (qn < queue.length) { queue[qn] = 100 + id; qvol[qn] = 0; qn++; queue.notify(); } }
     }
 
-    /** engine loop: idle when slow, rev when on the throttle */
+    static void voice(int kind, boolean female) {
+        if (!ok || !on) return;
+        String[] set = (female ? VOICE_F : VOICE)[kind];
+        synchronized (queue) { pendingVoice = set[Fx.rnd(set.length)]; if (qn < queue.length) { queue[qn] = 300; qvol[qn] = 90; qn++; queue.notify(); } }
+    }
+
+    /** engine loop: idle when slow, rev on the throttle; a change has to hold for 0.7 s so the loops don't restart constantly */
     static void engine(boolean running, int pct) {
-        int s = !running ? 0 : (pct < 25 ? 1 : 2);
+        int s = !running ? 0 : (pct < 22 ? 1 : (pct > 30 ? 2 : (engineState > 0 ? engineState : 1)));
+        long now = System.currentTimeMillis();
+        if (s != wantEngine) { wantEngine = s; wantSince = now; }
         if (s == engineState) return;
+        if (s != 0 && engineState > 0 && now - wantSince < 700) return;
         if (engineState == 1) stop(IDLE);
         if (engineState == 2) stop(REV);
         engineState = s;

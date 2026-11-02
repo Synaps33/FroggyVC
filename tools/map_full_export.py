@@ -16,7 +16,9 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import obj_cache
 
 ROOT = os.path.join(HERE, '..')
-RES = os.path.join(ROOT, 'res')
+LEGACY = os.environ.get('LEGACY') == '1'
+RES = os.path.join(ROOT, 'res_legacy' if LEGACY else 'res')
+LEG_REGION = (20, 7, 22, 9)          # tile box around the Ocean View Hotel (Ocean Drive)
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'assets', 'map_full', 'GTA Vice City Map Full.obj')
 TEXDIR = os.path.join(os.path.dirname(SRC), 'textures')
 WATERTEX = os.path.join(ROOT, 'assets', 'particles', 'waterclear256.png')
@@ -33,7 +35,8 @@ NS = int(TILE / SC)  # 100
 RCELL = 8.0          # radar pixel
 SPAWN_OBJ = 'wshbuildws09'
 DROP = re.compile(r'^(od_lightint|od_bighotsign01)', re.I)
-F_DOUBLE, F_EMISSIVE, F_WATER = 1, 2, 4
+F_DOUBLE, F_EMISSIVE, F_WATER, F_NIGHT, F_DAY = 1, 2, 4, 8, 128
+NEON = re.compile(r'neon', re.I)
 
 SURF_ROAD, SURF_PAVE, SURF_GRASS, SURF_SAND, SURF_ROCK = 4, 3, 2, 1, 5
 def surf_of(t):
@@ -70,6 +73,45 @@ def main():
     wtid = len(texnames); texnames.append('__water__')
     msurf = np.array([surf_of(t or '') for t in mtex] + [SURF_PAVE], np.uint8)
     ftid = mtid[FM]; falpha = malpha[FM]; fsurf = msurf[FM]
+    # VC time objects: *_nt only at night (lit windows, emissive), their *_dy twin only by day; neon always glows
+    bl = [n.lower() for n in base]
+    names_set = set(bl)
+    oflag = np.zeros(len(names), np.uint8)
+    for i, n in enumerate(bl):
+        f = 0
+        if n.endswith('_nt'): f |= F_NIGHT | F_EMISSIVE
+        elif n.endswith('_dy') and (n[:-3] + '_nt') in names_set: f |= F_DAY
+        if NEON.search(n): f |= F_EMISSIVE
+        oflag[i] = f
+    tneon = np.array([bool(t and NEON.search(t)) for t in mtex] + [False])
+    fobj = oflag[FO] | np.where(tneon[FM], F_EMISSIVE, 0).astype(np.uint8)
+    # neon colours: the OBJ lost the vertex colours, so take them from the DFF prelight in gta3.img (pink / blue tubes)
+    global FCOL
+    FCOL = np.full((len(FV), 3), -1, np.int16)
+    img = os.environ.get('IMG')
+    if img and os.path.exists(img):
+        import img_extract, rwtools
+        ents = img_extract.read_dir(img); fimg = open(img, 'rb')
+        Vidx = None
+        for i in np.where([bool(NEON.search(n)) for n in bl])[0]:
+            key = bl[i] + '.dff'
+            if key not in ents: continue
+            off, sz = ents[key]; fimg.seek(off * 2048); open('/tmp/_neon.dff', 'wb').write(fimg.read(sz * 2048))
+            try: g = rwtools.read_dff('/tmp/_neon.dff')['geoms'][0]
+            except Exception: continue
+            pre = g.get('prelit')
+            if pre is None: continue
+            pre = pre[:, :3].astype(int)
+            sel = np.where(FO == i)[0]
+            if len(sel) == 0: continue
+            vi = np.unique(FV[sel])
+            if len(vi) == len(pre):                                     # same vertex order as the DFF
+                lut = {int(v): k for k, v in enumerate(vi)}
+                for k in sel: FCOL[k] = pre[[lut[int(v)] for v in FV[k]]].mean(0)
+            else:
+                FCOL[sel] = pre.mean(0)
+        print('neon colours for', int((FCOL[:, 0] >= 0).sum()), 'faces')
+    fobj = np.where(FCOL[:, 0] >= 0, fobj | 16 | F_EMISSIVE, fobj).astype(np.uint8)
 
     # ---- object size (for LOD)
     P0 = W[FV[:, 0]]
@@ -106,7 +148,7 @@ def main():
     texture_out = not os.path.exists(os.path.join(RES, 'x', '%d.png' % (len(texnames) - 1)))
     SW, SH = NX * NS, NZ * NS
     if texture_out: write_textures(texnames)
-    tiles_out(texnames, wtid, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, fdiag, ny, ti, tj, TI0, TJ0, NX, NZ, top, low, surf, has, solid, GX0, GZ0)
+    tiles_out(texnames, wtid, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, fdiag, ny, ti, tj, TI0, TJ0, NX, NZ, top, low, surf, has, solid, GX0, GZ0, fobj)
     finalize(texnames, base, FO, A, Bv, C, cen, ftid, top, low, surf, has, solid, GX0, GZ0, GW, GH, NX, NZ)
 
 
@@ -157,6 +199,8 @@ def grids(A, Bv, C, cen, ny, small, fsurf, GX0, GZ0, GW, GH, NX, NZ):
         Pp = a[None] + u[m][:, None] * (b - a)[None] + v[m][:, None] * (c - a)[None]
         gi = np.clip(((Pp[:, 0] - GX0) / HC).astype(int), 0, GW - 1); gj = np.clip(((Pp[:, 2] - GZ0) / HC).astype(int), 0, GH - 1)
         g = np.where(has[gj, gi], low[gj, gi], -50)
+        # only things that stand on the ground block (poles, palms, walls) - not awnings/balconies hanging over the street
+        if min(a[1], b[1], c[1]) > g.min() + 0.6: continue
         hit = (Pp[:, 1] > g + 0.4) & (Pp[:, 1] < g + 2.4)
         if not hit.any(): continue
         si = np.clip(((Pp[hit, 0] - GX0) / SC).astype(int), 0, SW - 1); sj = np.clip(((Pp[hit, 2] - GZ0) / SC).astype(int), 0, SH - 1)
@@ -177,7 +221,9 @@ def write_textures(texnames):
     print('textures', len(texnames))
 
 
-def tiles_out(texnames, wtid, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, fdiag, ny, ti, tj, TI0, TJ0, NX, NZ, top, low, surf, has, solid, GX0, GZ0):
+def tiles_out(texnames, wtid, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, fdiag, ny, ti, tj, TI0, TJ0, NX, NZ, top, low, surf, has, solid, GX0, GZ0, fobj):
+    global FOBJ
+    FOBJ = fobj
     os.makedirs(os.path.join(RES, 't'), exist_ok=True)
     order = np.lexsort((tj, ti))
     tri_near = tri_far = 0
@@ -190,6 +236,7 @@ def tiles_out(texnames, wtid, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, fdiag
     for J in range(NZ):
         for I in range(NX):
             tx, tz = I + TI0, J + TJ0
+            if LEGACY and not (LEG_REGION[0] <= I <= LEG_REGION[2] and LEG_REGION[1] <= J <= LEG_REGION[3]): continue
             g = gmap.get((tx, tz), np.zeros(0, int))
             g = g[fdiag[g] > 2.0]                                    # tiny clutter is not worth the bytes
             if os.path.exists(os.path.join(RES, 't', '%d_%d.bin' % (I, J))): tile_flags[J, I] = 1; continue
@@ -199,13 +246,15 @@ def tiles_out(texnames, wtid, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, fdiag
             tHas = has[hb]
             water = water_faces(tTop, tHas, I, J, GX0, GZ0, ox, oz)
             if len(g) == 0 and not water and not tHas.any(): continue
-            near, ntex_n = build_mesh(g, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, ox, oz, cluster=None, extra=water, wtid=wtid)
+            if LEGACY: g = g[(fdiag[g] > 4.0) & ((FOBJ[g] & F_NIGHT) == 0)]
+            near, ntex_n = build_mesh(g, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, ox, oz, cluster=0.7 if LEGACY else None, extra=water, wtid=wtid)
             for cl in (0.3, 0.6, 1.2):
                 if len(near[0]) < 60000 and near[1] < 60000: break
                 print('tile', I, J, 'too dense (%d verts), clustering %.1f m' % (len(near[0]), cl))
                 near, ntex_n = build_mesh(g, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, ox, oz, cluster=cl, extra=water, wtid=wtid)
             gfar = g[(fdiag[g] > 25.0) & (np.abs(ny[g]) > 0.25) | (fdiag[g] > 50.0)]
-            far, _ = build_mesh(gfar, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, ox, oz, cluster=4.0, extra=water, wtid=wtid)
+            if LEGACY: gfar = gfar[:0]
+            far, _ = build_mesh(gfar, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, ox, oz, cluster=4.0, extra=[] if LEGACY else water, wtid=wtid)
             tri_near += near[1]; tri_far += far[1]
             out = bytearray(b'T1')
             texs = sorted(set(near[2]) | set(far[2]))
@@ -219,11 +268,11 @@ def tiles_out(texnames, wtid, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, fdiag
             open(os.path.join(RES, 't', '%d_%d.bin' % (I, J)), 'wb').write(out)
             tile_flags[J, I] = 1
     print('tris near', tri_near, 'far', tri_far, 'tiles', int(tile_flags.sum()))
-    np.save(os.path.join(RES, '..', 'build_tileflags.npy'), tile_flags)
+    np.save(os.path.join(RES, '..', 'build_tileflags%s.npy' % ('_legacy' if LEGACY else '')), tile_flags)
 
 
 def finalize(texnames, base, FO, A, Bv, C, cen, ftid, top, low, surf, has, solid, GX0, GZ0, GW, GH, NX, NZ):
-    tile_flags = np.load(os.path.join(RES, '..', 'build_tileflags.npy'))
+    tile_flags = np.load(os.path.join(RES, '..', 'build_tileflags%s.npy' % ('_legacy' if LEGACY else '')))
     SW, SH = NX * NS, NZ * NS
 
     # ---- radar (8 m) from surfaces + building footprints (top much higher than low ground)
@@ -263,6 +312,14 @@ def finalize(texnames, base, FO, A, Bv, C, cen, ftid, top, low, surf, has, solid
             if score > bscore: bscore, best = score, (x, z)
     if best is None: best = (bx0 - 4, (bz0 + bz1) / 2)
     sx, sz = best
+    if LEGACY:                                    # Ocean View Hotel, Ocean Drive
+        cands = []
+        for x in np.arange(170, 260, 1.0):
+            for z in np.arange(-1340, -1240, 1.0):
+                gi, gj = int((x - GX0) / HC), int((z - GZ0) / HC)
+                if has[gj, gi] and surf[gj, gi] == SURF_PAVE and 0 < top[gj, gi] < 10 and not solid[int((z - GZ0) / SC), int((x - GX0) / SC)]:
+                    cands.append((abs(x - 215) + abs(z + 1290), x, z))
+        if cands: _, sx, sz = min(cands)
     gi, gj = int((sx - GX0) / HC), int((sz - GZ0) / HC)
     sy = top[gj, gi]
     # face along the alley towards the open street
@@ -340,14 +397,17 @@ def build_mesh(g, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, ox, oz, cluster, 
     P = np.stack([A[g], Bv[g], C[g]], 1)                      # (n,3,3)
     U = VTf[g].astype(np.float64).copy()                       # (n,3,2)
     U[:, :, 1] = -U[:, :, 1]
-    tex = ftid[g]; alpha = falpha[g]; kd = mkd[FM[g]]
+    tex = ftid[g]; alpha = falpha[g]; kd = mkd[FM[g]].copy(); ofl = FOBJ[g] if len(g) else np.zeros(0, np.uint8)
+    if len(g):
+        fc = FCOL[g]; hasc = fc[:, 0] >= 0
+        kd[hasc] = np.clip(fc[hasc] / 255.0 * 1.15, 0, 1)
     if cluster:
         Q = np.round(P / cluster) * cluster
         e1 = np.linalg.norm(Q[:, 1] - Q[:, 0], axis=1); e2 = np.linalg.norm(Q[:, 2] - Q[:, 1], axis=1); e3 = np.linalg.norm(Q[:, 0] - Q[:, 2], axis=1)
         ok = (e1 > 1e-6) & (e2 > 1e-6) & (e3 > 1e-6)
         area = np.linalg.norm(np.cross(Q[:, 1] - Q[:, 0], Q[:, 2] - Q[:, 0]), axis=1)
         ok &= area > cluster * cluster * 0.3
-        P, U, tex, alpha, kd = Q[ok], U[ok], tex[ok], alpha[ok], kd[ok]
+        P, U, tex, alpha, kd, ofl = Q[ok], U[ok], tex[ok], alpha[ok], kd[ok], ofl[ok]
     else:
         # density cut: small props snap to 0.4 m, everything else to 0.15 m (drops sliver/detail triangles)
         q = np.where(small[g], 0.5, 0.3)[:, None, None]
@@ -355,12 +415,12 @@ def build_mesh(g, A, Bv, C, VTf, ftid, falpha, mkd, FM, small, ox, oz, cluster, 
         area = np.linalg.norm(np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0]), axis=1)
         e = np.minimum(np.minimum(np.linalg.norm(P[:, 1] - P[:, 0], axis=1), np.linalg.norm(P[:, 2] - P[:, 1], axis=1)), np.linalg.norm(P[:, 0] - P[:, 2], axis=1))
         ok = (area > 0.02) & (e > 1e-6)
-        P, U, tex, alpha, kd = P[ok], U[ok], tex[ok], alpha[ok], kd[ok]
+        P, U, tex, alpha, kd, ofl = P[ok], U[ok], tex[ok], alpha[ok], kd[ok], ofl[ok]
     faces = []
     du = np.abs(U[:, :, None, :] - U[:, None, :, :]).max(axis=(1, 2, 3))
     dp = np.linalg.norm(P[:, :, None, :] - P[:, None, :, :], axis=3).max(axis=(1, 2))
     for k in range(len(P)):
-        t = int(tex[k]); fl = F_DOUBLE if alpha[k] else 0
+        t = int(tex[k]); fl = (F_DOUBLE if alpha[k] else 0) | int(ofl[k])
         rgb = tuple(int(c * 255) for c in kd[k])
         if dp[k] <= MAX_EDGE and (t < 0 or du[k] <= MAX_UV):
             faces.append((P[k], U[k], t, fl, rgb))

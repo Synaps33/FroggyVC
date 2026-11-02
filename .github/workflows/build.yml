@@ -46,6 +46,9 @@ jobs:
           python3 tools/package.py dist
           # smaller build: Ocean Beach + Washington Beach only (rest of the map is sea)
           MAP_REGION=16,2,25,20 JAR_NAME=GTA_VC_J2ME_lite python3 tools/package.py dist
+          # legacy: Ocean Drive only, 16 px textures, small pools (Asha 311 class phones, touch buttons)
+          pip install --quiet pillow
+          LEGACY=1 python3 tools/package.py dist
           ls -la dist
 
       - uses: actions/upload-artifact@v4
@@ -61,10 +64,12 @@ jobs:
           body: |
             Automatic build of ${{ github.sha }}.
             Install on the Nokia E72: copy the .jar (and .jad) to the phone and open it.
-            GTA_VC_J2ME.jar = whole map (big); GTA_VC_J2ME_lite.jar = Ocean Beach + Washington Beach only.
+            GTA_VC_J2ME.jar = whole map (big); GTA_VC_J2ME_lite.jar = Ocean Beach + Washington Beach only. GTA_VC_J2ME_legacy.jar = Ocean Drive only, for low-end phones (touch buttons on touch screens).
           files: |
             dist/GTA_VC_J2ME.jar
             dist/GTA_VC_J2ME.jad
             dist/GTA_VC_J2ME_lite.jar
             dist/GTA_VC_J2ME_lite.jad
+            dist/GTA_VC_J2ME_legacy.jar
+            dist/GTA_VC_J2ME_legacy.jad
           make_latest: true

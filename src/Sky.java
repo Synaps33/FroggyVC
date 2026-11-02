@@ -2,7 +2,7 @@ import java.io.IOException;
 
 /** Vice City sky: timecyc gradient, drifting clouds, sun + corona, moon, stars, lens flare and the lighthouse glow. */
 final class Sky {
-    static int[] flash, smoke, fire, explo; static int sFlash, sSmoke, sFire, sExplo;
+    static int[] flash, smoke, fire, explo, tgt; static int sFlash, sSmoke, sFire, sExplo, sTgt;
     static int[] cloud1, cloud2, cloud3, hilit, corona, star, moon, ringa, hex, circle, reflect, streek;
     static int sCloud, sCorona, sStar, sMoon, sRing, sHex, sCircle, sReflect, sStreek;
     static int sunX, sunY, sunZ;              // direction towards the sun, 2.14
@@ -29,6 +29,7 @@ final class Sky {
         smoke = Assets.intensity("/fx_smoke.png", dm); sSmoke = dm[0];
         fire = Assets.intensity("/fx_fire.png", dm); sFire = dm[0];
         explo = Assets.intensity("/fx_explo.png", dm); sExplo = dm[0];
+        tgt = Assets.intensity("/fx_target.png", dm); sTgt = dm[0];
         int seed = 1234567;
         for (int i = 0; i < NSTAR; i++) {
             seed = seed * 1103515245 + 12345; starA[i] = (seed >>> 8) & 1023;
@@ -118,6 +119,22 @@ final class Sky {
         if (type == 0) spr(r.fb, r.W, r.H, smoke, sSmoke, sx, sy, s, s, 0x606060, 1, fade * 3 / 4);
         else if (type == 1) spr(r.fb, r.W, r.H, fire, sFire, sx, sy, s, s * 5 / 4, 0xFF9030, 0, fade);
         else spr(r.fb, r.W, r.H, explo, sExplo, sx, sy, s, s, 0xFFB050, 0, fade);
+    }
+
+    /** PS2-style lock-on reticle over the target; green -> yellow -> red with its health */
+    static void target(R3D r, int x, int y, int z, int hp, int maxHp, int time) {
+        int dx = x - r.camX, dy = y - r.camY, dz = z - r.camZ;
+        int[] m = r.mv;
+        int vz = (m[6] * dx + m[7] * dy + m[8] * dz) >> 14;
+        if (vz < 80) return;
+        int vx = (m[0] * dx + m[1] * dy + m[2] * dz) >> 14, vy = (m[3] * dx + m[4] * dy + m[5] * dz) >> 14;
+        int sx = r.cx + vx * r.focal / vz, sy = r.cy - vy * r.focal / vz;
+        int s = r.focal * 70 / vz + 10 + ((Fx.sin(time / 2) * 3) >> 14);
+        int f = hp * 255 / Math.max(1, maxHp);
+        if (f < 0) f = 0; if (f > 255) f = 255;
+        int col = f > 128 ? (((255 - f) * 2) << 16) | 0xFF00 : 0xFF0000 | ((f * 2) << 8);
+        spr(r.fb, r.W, r.H, tgt, sTgt, sx, sy, s, s, col, 1, 900);
+        spr(r.fb, r.W, r.H, tgt, sTgt, sx, sy, s, s, col, 0, 256);
     }
 
     static int mix(int a, int b, int t) {
