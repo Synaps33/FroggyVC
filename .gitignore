@@ -1,4 +1,14 @@
 build/
+build_sf2000/
 dist/
+screenshots/
+screenshots_java/
+screenshots_legacy/
+screenshots_legacy_mips/
+screenshots_mips/
+*.o
+*.a
+*.gb3k
+*.sf2k
 __pycache__/
 *.pyc

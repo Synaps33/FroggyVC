@@ -1,93 +1,241 @@
-# GTA Vice City – J2ME port (Nokia E72)
+# FroggyVC — GTA Vice City for GB300 V2 / SF2000
 
-Open-world Vice City for MIDP 2.0 / CLDC 1.1, using its own software 3D renderer (no M3G).
+**FroggyVC** is a from-scratch C port of the open-source J2ME demake
+[`aidencantcode/GTAVCJ2ME`](https://github.com/aidencantcode/GTAVCJ2ME) for the
+**GB300 V2** and **SF2000** retro handhelds.  It is the same Vice City map,
+vehicles, pedestrians, weapons and game logic as the J2ME version, translated
+1:1 to C and adapted to a 87 MHz MIPS32 CPU **without an FPU**.
 
-## Getting the JAR (built on GitHub)
-Push to `main` or `master`. The **Build JAR** workflow compiles, preverifies and packages the game, then publishes a Release with two builds:
+The original MIDP 2.0 / CLDC 1.1 implementation is kept in this repository as
+reference and for other devices (`src/`, `res/`, `res_legacy/`, `tools/`).
+The console port lives in **[`cport/`](cport/)**.
 
-| File | Content | Size |
-|---|---|---|
-| `GTA_VC_J2ME.jar` | the whole map | about 36 MB |
-| `GTA_VC_J2ME_lite.jar` | Ocean Beach + Washington Beach only; the rest of the map is open sea | about 15–17 MB |
+---
 
-Try the lite JAR first on the E72. The full one is big for an S60 phone.
-To make a different region, change `MAP_REGION=i0,j0,i1,j1` in `.github/workflows/build.yml`. Those are tile indices: tile = 100 m, x index = (GTA x + 1900) / 100, y index = (GTA y + 2100) / 100.
+## What is in the console port?
+
+- **Full Vice City map** — both main islands, Starfish Island, Prawn Island and
+  the small keys.  The complete map is streamed from the SD card.
+- **Software 3D renderer** — textured, depth-buffered, fixed-point rasteriser;
+  no FPU and no libm in the frame loop.
+- **Streaming with no multi-second stalls** — pre-split tile chunks (`tc/`) and
+  raw/atlas map textures are generated on the PC and read from the SD card.
+- **Audio** — effects, voice lines, engine and siren loops mixed at 44.1 kHz
+  and sent through the libretro audio callback.
+- **First story mission** — *An Old Friend*: meet Ken, drive to the Ocean View
+  Hotel, three-minute timer, $100 reward.
+- **Controls** — Switch-style ABXY, always-on autorun, L/R handbrake /
+  look-behind while driving.
+- **Settings** — saved to `te_gtavc_opts.rms`: brightness, draw distance,
+  limiter, PS2 filter, subtitles, wide screen, radar/HUD, traffic density and
+  screen resolution.  Resolution modes: 320×240, 240×180, 160×120, 106×80.
+- **Save/continue** — progress is stored in the platform data directory;
+  settings and mission state survive a reboot.
+
+---
 
 ## Controls
-| Key | On foot | Vehicle |
+
+| GB300 / SF2000 | On foot | In a vehicle |
 |---|---|---|
-| D-pad | walk / turn | throttle, brake/reverse, steer |
-| Fire / 5 | punch combo / bat swing / **hold to shoot** (pistol locks on to the nearest person) | throttle |
-| 2 / 8, 4 / 6 | camera tilt / orbit | camera |
-| 0 | toggle **run / walk** | handbrake (powerslide) |
-| 1 (hold) | sprint | – |
-| 3 | switch weapon (fists / bat / pistol) | – |
-| * | enter / exit / carjack | exit |
-| # / soft keys | pause | pause |
+| D-pad | move / turn | steer |
+| **A** | sprint / run | accelerate |
+| **B** | attack | brake / reverse |
+| **X** | jump | handbrake |
+| **Y** | enter / exit vehicle | exit vehicle |
+| **L** | camera left | handbrake |
+| **R** | camera right | look behind |
+| **Select** | switch weapon | switch weapon |
+| **Start** | pause | pause |
 
-On the E72 QWERTY keyboard, use **Fn** (or numeric lock) for the number keys.
+Autorun is always enabled on the console.  Weapon switch cycles
+**fists → baseball bat → Colt 45** (only owned weapons with ammo are selected).
 
-## Builds
-| JAR | for | content |
-|---|---|---|
-| `GTA_VC_J2ME.jar` | E72 / big S60 phones | the whole map (~36 MB) |
-| `GTA_VC_J2ME_lite.jar` | | Ocean Beach + Washington Beach |
-| `GTA_VC_J2ME_legacy.jar` | Asha 311 class (S40) | Ocean Drive around the Ocean View Hotel, 4 cars, 5 peds, no intro movie, half resolution. On touch screens it shows transparent buttons. |
+---
 
-## Controls (new)
-* **1**: tap toggles walk/run, hold to sprint.
-* **0**: jump (handbrake in a car).
-* **5 held with the pistol**: lock-on with a PS2-style reticle (green → red with the target's health).
-* **0 + \***: debug/trainer menu. Spawn any vehicle from the list, set the time of day, Tommy speed, game speed, god mode, clear wanted level, weapons + money, teleport to spawn.
-* **Options → ps2 filter**: warm colour grade, bloom and motion trails.
+## Repository layout
 
-## Save / continue
-The game saves to the phone (RMS record store) every 20 s, and whenever you pause, quit or the phone interrupts it. It keeps your money, your last position (where your car was, if you were driving), the clock, and the bat/pistol and ammo. **Continue** appears at the top of the main menu once a save exists.
-
-## New in this build
-* Dead peds drop cash about half the time (gang members drop more), and dead cops always drop their pistol. Dropped pickups vanish after 30 s.
-* Ped and Tommy textures fixed (the UVs were flipped twice).
-* Starts at night (22:00) with the white Admiral parked next to Tommy.
-* Cars use the real `handling.cfg` values (mass, traction, top speed, acceleration, brakes, steering lock).
-* Cars no longer get stuck on bridge ramps and kerbs: only steps over 1.1 m count as walls.
-* Damage takes much longer. Panels dent and then fall off, the engine smokes when damaged, and at 0 HP it catches fire. About 5 s later it explodes: it kills you if you're still inside and hurts anyone close.
-* The radar and pause map use your VC map picture (auto-aligned to the world). No ped or car blips, only flashing cops while you're wanted.
-
-## What's in it
-* **Full map**:
-  * The 1.5 M-triangle Blender export is cut into 1,216 tiles of 100 m. They stream in on a background thread with a near and a far version of each tile, and textures load on demand into a 512-slot cache.
-  * Ground uses a 2-layer height grid, so you can walk under bridges and stay on top of overpasses.
-  * Walls/steps, lamps, palms and poles are solid.
-  * There is generated sea using `waterclear256`. Tommy still can't swim.
-* **Spawn**: in the alley beside `wshbuildws09` (Ken Rosenberg's office), with a pistol and a bat lying in the alley.
-* **Peds**: 102 Vice City peds converted from `gta3.img`, including Tommy (`player.dff`), cops, gangs and street peds.
-  * 12 models are loaded at a time and swapped every ~40 s, with about 22 peds on screen.
-  * Peds follow the pavement, sometimes cross, flee from cars and gunfire. Gang members and some others fight back.
-* **Vehicles**: 80 cars and bikes from `gta3.img` (every land vehicle except planes, boats, RC and the tank).
-  * 10 models are loaded at a time and swapped, with up to 8 in traffic.
-  * Panel damage (ok / damaged / falls off) and an explosion when wrecked.
-* **Car physics**:
-  * Velocity is now separate from the heading: grip pulls sideways speed down, the handbrake breaks rear grip, and yaw follows the steering with grip-limited response.
-  * Slopes add gravity, cars have mass in collisions, and the body pitches and rolls.
-  * The chase camera follows the direction of travel.
-  * Handling classes: car / sports / heavy / bike / slow.
-* **Cops**:
-  * 1 star: they try to arrest you, and only hit back if you fight.
-  * 2+ stars: they shoot, and police cars chase you (with siren).
-  * Stars fade after about 22 s out of sight.
-* **Sounds**: 15 effects pulled from `sfx.raw` (punch, colt45, bat, crash, doors, horn, pickup, explosion, splash, siren, engine idle/rev loops).
-* **Screens**: real loading screens and title splash from the TXDs. The menu/HUD use Pricedown (`assets/fonts/hud.otf`) and tips use regular Noto Sans. The menu now fades in after the intro movie instead of cutting.
-
-## Rebuilding assets (local, not in CI)
-The sources are too large for GitHub, so keep them outside the repo:
 ```
-python3 tools/map_full_export.py "path/GTA Vice City Map Full.obj"   # needs textures/ beside the .obj, ~10 min, ~1.5 GB RAM
-python3 tools/ped_export.py   path/gta3.img
-CARS=dir_with_dff_txd python3 tools/car_export.py admiral ...       # tools/img_extract.py pulls them out of gta3.img
-python3 tools/weapon_export.py path/gta3.img
-python3 tools/sound_export.py  path/Audio                             # sfx.RAW + sfx.SDT
-python3 tools/screens_export.py path/txd                              # LOADSC*.TXD, SPLASH1.TXD
-python3 tools/fx_export.py                                            # sprites + fonts
+cport/                 C port, assets and build files for GB300 V2 / SF2000
+  src/                 C translation of the J2ME classes
+  libretro/            libretro core wrapper
+  runner/              host/MIPS replay runner and tests
+  assets/              full game assets (map tiles, textures, models, audio)
+    tc/                pre-split tile chunks
+    x/                 map textures, raw caches and xatlas.bin
+  tools/               texture cache / tile cache generators
+  Makefile
+  install_to_sd.sh
+  README.md            detailed port notes
+  PORTING_GUIDE.md
+  VERIFICATION.md
+src/                   original J2ME Java sources
+res/, res_legacy/      original J2ME resources
+assets/                original J2ME source assets
+tools/                 original J2ME asset/build tools
+.github/               original J2ME CI workflow
 ```
-Building locally: JDK 17 + Python 3 → `bash tools/build.sh && python3 tools/package.py dist`.
-`tools/test.sh Shots` runs a headless session with screenshots.
+
+---
+
+## Build
+
+### Requirements
+
+- Linux host with `gcc`, `make`, Python 3 and Pillow (only for regenerating
+  asset caches).
+- A MIPS32 soft-float toolchain; the port was built with the MTI GCC 7.4
+  toolchain (`mipsel-mti-elf-*`).
+- The froggy multicore frontend for the final device link.
+- For the host/MIPS tests: `make`, `qemu-mipsel` and a musl MIPS soft-float
+  cross compiler (the repository's `tools/test_mips.sh` documents the paths).
+
+### Host build
+
+```bash
+cd cport
+make host
+./build/gtavc_runner assets screenshots
+```
+
+The runner replays the original J2ME test scenario.  Directories and command
+line options are intentionally simple so it can run on a PC or under qemu.
+
+### MIPS soft-float test
+
+```bash
+cd cport
+make mips-test
+```
+
+This builds the same runner with `mipsel-linux-muslsf-gcc`, links it statically
+and runs it under `qemu-mipsel`.  It proves that all float use goes through
+soft-float helpers.
+
+### Device build
+
+```bash
+cd cport
+make device FROGGY_TYPE=GB300V2 \
+  MULTICORE=/path/to/sf2000_multicore
+```
+
+`MIPS_ELF` and `MULTICORE` can be overridden at the command line.  For an
+SF2000 build use `FROGGY_TYPE=SF2000`; the output is
+`dist/gtavc_SF2000.sf2k` instead of `dist/gtavc_GB300V2.gb3k`.
+
+The resulting core is linked with `-msoft-float`; a useful sanity check is:
+
+```bash
+mipsel-mti-elf-readelf -A build/core.elf | grep FP
+mipsel-mti-elf-objdump -d build/core.elf | grep -E 'cop1|mtc1|mfc1'
+```
+
+The first line should say `Tag_GNU_MIPS_ABI_FP: Soft float`; the second should
+find no instructions.
+
+---
+
+## Install on the SD card
+
+Build the device core first, then run:
+
+```bash
+cd cport
+./install_to_sd.sh /media/$USER/GB300 GB300V2
+```
+
+The installer copies:
+
+- the core to `system/Deimos/cores`, `cores/gtavc` and `ROMS/gtavc`,
+- the full `assets/` tree, including the `tc/` tile cache and `x/*.raw` /
+  `x/xatlas.bin` texture caches,
+- the launcher stubs and artwork.
+
+Allow a minute or two: the game assets are about 200 MB and many small files on
+FAT32 are slow.  Start the game from `ROMS/gtavc/GTAVC.gb3k`.
+
+If you use a different mount point, pass it as the first argument.  The second
+argument selects `GB300V2` or `SF2000`.
+
+---
+
+## Asset caches
+
+The assets in `cport/assets` already contain the generated caches, but they can
+be rebuilt from the source PNG/tile files:
+
+```bash
+cd cport
+python3 tools/predecode_textures.py
+python3 tools/pack_texture_atlas.py
+GTAVC_TILECACHE=1 ./build/gtavc_runner assets /tmp/tile_shots
+```
+
+- `tools/predecode_textures.py` — converts all 32×32 PNGs in `assets/x` to raw
+  ARGB files.
+- `tools/pack_texture_atlas.py` — packs them into `assets/x/xatlas.bin`.
+- `GTAVC_TILECACHE=1` — writes `assets/tc/<i>_<j>.bin` (pre-split chunks with
+  top/low/surface/solid data).
+
+If a cache is missing, the game falls back to the original tile file and PNG
+decoding.  The fallback is correct but slower and may hitch while driving, so
+keep the caches on the card.
+
+---
+
+## Tests
+
+Use `GTAVC_SEED=1234567` for a reproducible run.
+
+```bash
+cd cport
+GTAVC_SEED=1234567 ./build/gtavc_runner assets /tmp/shots
+GTAVC_SEED=1234567 GTAVC_MISSIONTEST=1 ./build/gtavc_runner assets /tmp/mission
+GTAVC_AUDIOTEST=1 ./build/gtavc_runner assets /tmp/audio
+GTAVC_SPAWNCHECK=1 ./build/gtavc_runner assets /tmp/spawn
+```
+
+Extra diagnostics:
+
+- `GTAVC_TILELOG=1` — print tile read/split timings.
+- `GTAVC_TILEBENCH=1` — load a dense tile and print its breakdown.
+- `GTAVC_STRESS=N` — run N simulated frames with random driving/input.
+- `GTAVC_DENSITYTEST=1` — drive the real options menu through low/medium/high
+  and print live pedestrian/car counts.
+
+The host and MIPS runners have been compared screenshot-for-screenshot; with
+the same seed the images are pixel-identical.
+
+---
+
+## Notes and limitations
+
+- The target CPU has no FPU.  All gameplay and rendering code uses integers;
+  soft-float is only used during asset loading for normal/sqrt calculations.
+- The console hardware is mono; the libretro frontend averages the stereo
+  channels.
+- The J2ME **intro video** is not decoded by the console port; `intro.3gp` is
+  present but the port treats it as unavailable/skipped.
+- Audio is limited to the original J2ME effect/voice set.  There is no music
+  player in the port.
+- The first mission is a compact console adaptation; there are no full
+  cutscenes.
+- Assets are from the GTA Vice City J2ME demake and remain the property of
+  their respective copyright holders.  This repository is a non-commercial
+  fan port and is not affiliated with Rockstar Games or Take-Two Interactive.
+
+---
+
+## Credits
+
+- Original J2ME demake, map/tools and assets:
+  [`aidencantcode/GTAVCJ2ME`](https://github.com/aidencantcode/GTAVCJ2ME)
+- C port, console adaptation, caches and tests: Synaps33 / FroggyVC.
+- Froggy multicore frontend: the SF2000/GB300 community project used to build
+  and run the core.
+
+## License
+
+See [LICENSE](LICENSE).  The original J2ME source is included under its
+original terms; the C port is provided for personal, non-commercial use.
