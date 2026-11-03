@@ -383,15 +383,9 @@ void World_drawHeld(World* w, PedModel* m, Mesh* mesh) {
     R3D* r = w->r;
     PedModel_hand(m, w->handW);
     int* R = m->rp[2];
-    int Rfix[9];
-    if (w->weapon == 1) {
-        /* w_bat.bin has its long axis along +x, the forearm axis.  Turn the
-           mesh 180 degrees around the grip so the barrel stands up instead
-           of lying sideways. */
-        static const int flip[9] = { -16384, 0, 0, 0, -16384, 0, 0, 0, 16384 };
-        Fx_mul(R, flip, Rfix);
-        R = Rfix;
-    }
+    /* The bat mesh is exported with its long axis along +x, matching the
+       forearm.  Keep that original orientation (the previous 180-degree
+       correction made it point behind Tommy). */
     int dx = w->handW[0] - r->camX;
     int dy = w->handW[1] - r->camY;
     int dz = w->handW[2] - r->camZ;

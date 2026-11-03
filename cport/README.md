@@ -140,7 +140,7 @@ written when changed, when leaving the options screen, and on exit.
 The shipped `FIGHTppunch` animation in `anim.bin` is a **static side-lying
 pose** (all nine exported frames are identical), so the old bat attack made
 Tommy rotate onto his side.  `cPunch` now uses the animated, upright
-`FIGHTpunch` clip; the bat mesh is also turned 180 degrees around its grip
+`FIGHTpunch` clip; the bat mesh is also kept in its original grip orientation
 (its +x axis is the forearm axis) so the barrel points forward from the hand
 instead of backwards.  The pistol attachment is unchanged.
 

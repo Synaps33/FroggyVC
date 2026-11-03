@@ -136,8 +136,7 @@ Other target-side changes:
   frames), which made Tommy horizontal during the bat attack.  `World_initClips`
   maps `cPunch` to the animated upright `FIGHTpunch` clip instead.  This also
   fixes fist combo 2, which used the same clip.
-- `World_drawHeld` applies a bat-only 180-degree local-z rotation around the
-  grip.  `w_bat.bin` is exported with its long axis along +x, the same axis as
+- `World_drawHeld` uses the bat mesh in its original grip orientation.  `w_bat.bin` is exported with its long axis along +x, the same axis as
   the forearm; this makes the barrel stand vertical instead of lying sideways.
   The pistol is untouched.
 - `World_spawnPed` picks a slot from `w->npool` (not `WORLD_NPOOL`) and
