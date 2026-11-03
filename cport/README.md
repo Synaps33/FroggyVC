@@ -126,9 +126,9 @@ Measured with the MIPS32 soft-float runner under qemu (not the real CPU):
 `Options -> screen resolution` cycles **320x240 / 240x180 / 160x120 / 106x80**
 (default on the console: 160x120, the upstream legacy mode).  The new 240x180
 mode sits between the two original resolutions.  `Options -> traffic density`
-cycles **low / medium / high** populations independently of the model pools.
-On the legacy configuration that is **6 / 10 / 16 pedestrians and 2 / 3 / 5
-cars**; with the full model pool it is **12 / 22 / 30 and 3 / 8 / 10**.  The
+cycles **low / medium / high / very high** populations independently of the model pools.
+On the legacy configuration that is **6 / 10 / 16 / 16 pedestrians and 2 / 3 / 5 / 8
+cars**; with the full model pool it is **12 / 22 / 30 / 30 and 3 / 8 / 10 / 12**.  The
 spawner now only picks ped slots that actually have a loaded model, so a
 density change is reflected immediately and fewer pedestrians vanish.
 
@@ -140,7 +140,7 @@ written when changed, when leaving the options screen, and on exit.
 The shipped `FIGHTppunch` animation in `anim.bin` is a **static side-lying
 pose** (all nine exported frames are identical), so the old bat attack made
 Tommy rotate onto his side.  `cPunch` now uses the animated, upright
-`FIGHTpunch` clip; the bat mesh is also turned -90 degrees around its grip
+`FIGHTpunch` clip; the bat mesh is also turned 180 degrees around its grip
 (its +x axis is the forearm axis) so the barrel points forward from the hand
 instead of backwards.  The pistol attachment is unchanged.
 

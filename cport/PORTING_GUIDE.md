@@ -125,7 +125,7 @@ Other target-side changes:
   missing, so pedestrians stay visible.
 - Ped meshes have a flat fallback colour and `World_drawPed` falls back to the
   other LOD model if one is missing.
-- `Options` has a traffic-density entry (low/medium/high) and a 240x180
+- `Options` has a traffic-density entry (low/medium/high/very high) and a 240x180
   resolution mode between 320x240 and 160x120; the upscaler now uses source/
   destination ratios, not an integer scale.
 - Display options are persisted in `te_gtavc_opts.rms` in the platform data
@@ -136,14 +136,15 @@ Other target-side changes:
   frames), which made Tommy horizontal during the bat attack.  `World_initClips`
   maps `cPunch` to the animated upright `FIGHTpunch` clip instead.  This also
   fixes fist combo 2, which used the same clip.
-- `World_drawHeld` applies a bat-only -90-degree local-z rotation around the
+- `World_drawHeld` applies a bat-only 180-degree local-z rotation around the
   grip.  `w_bat.bin` is exported with its long axis along +x, the same axis as
-  the forearm; this makes the barrel point forward from the hand instead of
-  backwards/down.  The pistol is untouched.
+  the forearm; this makes the barrel stand vertical instead of lying sideways.
+  The pistol is untouched.
 - `World_spawnPed` picks a slot from `w->npool` (not `WORLD_NPOOL`) and
   `World_assignKind` falls back to a loaded model, so every pedestrian in the
-  legacy pool is visible and the density caps are real: 6/10/16 peds and
-  2/3/5 traffic cars on legacy, 12/22/30 and 3/8/10 with full assets.
+  legacy pool is visible and the density caps are real: 6/10/16/16 peds and
+  2/3/5/8 traffic cars on legacy; 12/22/30/30 peds and 3/8/10/12 cars with
+  the full assets.
   Increasing density tops the population up immediately via `fillPopulation`
   instead of waiting for the next ambient-spawn tick.
 

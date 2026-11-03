@@ -27,7 +27,7 @@ The console port lives in **[`cport/`](cport/)**.
 - **Controls** — Switch-style ABXY, always-on autorun, L/R handbrake /
   look-behind while driving.
 - **Settings** — saved to `te_gtavc_opts.rms`: brightness, draw distance,
-  limiter, PS2 filter, subtitles, wide screen, radar/HUD, traffic density and
+  limiter, PS2 filter, subtitles, wide screen, radar/HUD, traffic density (low / medium / high / very high) and
   screen resolution.  Resolution modes: 320×240, 240×180, 160×120, 106×80.
 - **Save/continue** — progress is stored in the platform data directory;
   settings and mission state survive a reboot.
@@ -201,7 +201,7 @@ Extra diagnostics:
 - `GTAVC_TILELOG=1` — print tile read/split timings.
 - `GTAVC_TILEBENCH=1` — load a dense tile and print its breakdown.
 - `GTAVC_STRESS=N` — run N simulated frames with random driving/input.
-- `GTAVC_DENSITYTEST=1` — drive the real options menu through low/medium/high
+- `GTAVC_DENSITYTEST=1` — drive the real options menu through low/medium/high/very high
   and print live pedestrian/car counts.
 
 The host and MIPS runners have been compared screenshot-for-screenshot; with

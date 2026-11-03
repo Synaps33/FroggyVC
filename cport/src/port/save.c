@@ -147,7 +147,7 @@ bool Save_loadOptions(struct Game* g) {
     if (bright >= 0 && bright <= 15) g->oBright = bright;
     if (draw >= 0 && draw <= 15) g->oDraw = draw;
     if (radar >= 0 && radar <= 2) g->oRadar = radar;
-    if (density >= 0 && density <= 2) g->oDensity = density;
+    if (density >= 0 && density <= 3) g->oDensity = density;
     if (res >= 0 && res <= 3) g->oRes = res;
     g->oLimiter = limiter;
     g->oTrails = trails;

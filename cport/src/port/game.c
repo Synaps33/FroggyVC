@@ -471,9 +471,13 @@ static void applyOptions(Game* g, bool fill) {
     } else if (g->oDensity == 1) {
         w->maxPed = g->legacy ? 10 : 22;
         w->maxTraffic = g->legacy ? 3 : 8;
-    } else {
+    } else if (g->oDensity == 2) {
         w->maxPed = g->legacy ? 16 : 30;
         w->maxTraffic = g->legacy ? 5 : 10;
+    } else {
+        /* Very high: same pedestrian cap, but much more road traffic. */
+        w->maxPed = g->legacy ? 16 : 30;
+        w->maxTraffic = g->legacy ? 8 : 12;
     }
     /* trim an existing population down to the new cap */
     int alive = countAlivePeds(w);
@@ -525,7 +529,7 @@ static void doOptions(Game* g, int e) {
             case 6: g->oLegend = !g->oLegend; break;
             case 7: g->oRadar = (g->oRadar + 3 + dlt) % 3; break;
             case 8: g->oHud = !g->oHud; break;
-            case 9: g->oDensity = (g->oDensity + 3 + dlt) % 3; break;
+            case 9: g->oDensity = (g->oDensity + 4 + dlt) % 4; break;
             case 10: g->oRes = (g->oRes + 1) % 4; g->needResize = true; break;
             default: break;
         }
@@ -566,7 +570,7 @@ static void doOptions(Game* g, int e) {
             case 7: Ui_textR(g->scr, g->W, g->H, xr, y, g->oRadar == 0 ? "map & blips" : (g->oRadar == 1 ? "blips only" : "off"), UI_PINK, g->u); break;
             case 8: Ui_textR(g->scr, g->W, g->H, xr, y, g->oHud ? "on" : "off", UI_PINK, g->u); break;
             case 9: Ui_textR(g->scr, g->W, g->H, xr, y,
-                             g->oDensity == 0 ? "low" : (g->oDensity == 1 ? "medium" : "high"), UI_PINK, g->u); break;
+                             g->oDensity == 0 ? "low" : (g->oDensity == 1 ? "medium" : (g->oDensity == 2 ? "high" : "very high")), UI_PINK, g->u); break;
             default: {
                 char buf[32];
                 int rw = g->W, rh = g->H;

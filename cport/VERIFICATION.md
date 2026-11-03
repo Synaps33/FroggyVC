@@ -117,12 +117,13 @@ Traffic density was measured through the real options menu on the console
 configuration (alive civilians / traffic cars):
 
 ```
-low    -> 6 peds / 2 cars
-medium -> 10 peds / 3 cars
-high   -> 16 peds / 5 cars
+low       -> 6 peds / 2 cars
+medium    -> 10 peds / 3 cars
+high      -> 16 peds / 5 cars
+very high -> 16 peds / 8 cars
 ```
 
-The same test with the full model pool gives 12 / 22 / 30 peds and 3 / 8 / 10
+The same test with the full model pool gives 12 / 22 / 30 / 30 peds and 3 / 8 / 10 / 12
 cars.  All spawned pedestrians have a loaded model and texture (`visible`
 equals `alive`), because `World_spawnPed` now picks from `w->npool` instead of
 the full `WORLD_NPOOL` range.

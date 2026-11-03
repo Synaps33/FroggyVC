@@ -691,11 +691,11 @@ int main(int argc, char** argv) {
         g->state = GAME_S_OPT;
         g->prevState = GAME_S_PAUSE;
         g->optSel = 9;
-        int orders[2][3] = { { 0, 1, 2 }, { 2, 0, 1 } };
+        int orders[2][4] = { { 0, 1, 2, 3 }, { 3, 0, 1, 2 } };
         for (int pass = 0; pass < 2; pass++) {
-            for (int q = 0; q < 3; q++) {
+            for (int q = 0; q < 4; q++) {
                 int d = orders[pass][q];
-                for (int guard = 0; guard < 4 && g->oDensity != d; guard++) {
+                for (int guard = 0; guard < 5 && g->oDensity != d; guard++) {
                     Game_keyPressed(g, KEY_RIGHT);
                     Game_frame(g, 33);
                     Game_keyReleased(g, KEY_RIGHT);

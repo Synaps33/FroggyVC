@@ -385,12 +385,10 @@ void World_drawHeld(World* w, PedModel* m, Mesh* mesh) {
     int* R = m->rp[2];
     int Rfix[9];
     if (w->weapon == 1) {
-        /* w_bat.bin has its long axis along +x, which is exactly the
-           forearm's axis.  Without a correction the bat hangs down and the
-           a straight punch reads as a forward thrust.  Turn the mesh 180
-           degrees around the grip (z) so the barrel points up along the arm;
-           the punch animation then swings it across. */
-        static const int flip[9] = { 0, 16384, 0, -16384, 0, 0, 0, 0, 16384 };
+        /* w_bat.bin has its long axis along +x, the forearm axis.  Turn the
+           mesh 180 degrees around the grip so the barrel stands up instead
+           of lying sideways. */
+        static const int flip[9] = { -16384, 0, 0, 0, -16384, 0, 0, 0, 16384 };
         Fx_mul(R, flip, Rfix);
         R = Rfix;
     }
