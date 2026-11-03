@@ -12,6 +12,8 @@ bool Snd_ok = false;
 #define SND_OUT_RATE 44100
 #define SND_MAX_MIX 12
 #define SND_VOICE_TAG 1000
+#define SND_RADIO_TAG 1001
+#define SND_RADIO_TRACKS 15
 #define SND_MASTER 70         /* percent: leave headroom before the mono hardware limiter */
 
 static const char* FILE_NAMES[SND_N] = {
@@ -44,12 +46,18 @@ typedef struct {
 static SndClip clips[SND_N];
 static SndClip voiceM[5][3];
 static SndClip voiceF[5][3];
+static SndClip radioClip;
+static int radioLoaded = -1;
+static bool radioPlaying = false;
+static bool radioPrepared = false;
+static int radioRetryMs = 0;
+static uint32_t radioSeed = 0x13579BDFu;
 
 typedef struct {
     const SndClip* clip;
-    uint32_t pos;      /* source position, 16.16 */
+    uint64_t pos;      /* source position, 16.16 (radio clips exceed 32 bit) */
     uint32_t step;     /* source samples per output sample, 16.16 */
-    uint32_t end;      /* len << 16 */
+    uint64_t end;      /* len << 16 */
     int vol;           /* 0..256, Q8 */
     int env;           /* 0..256 attack envelope */
     bool loop;
@@ -173,7 +181,7 @@ static MixVoice* allocVoice(void) {
     return steal;
 }
 
-static void startClip(int tag, const SndClip* c, int vol, bool loop) {
+static void startClipAt(int tag, const SndClip* c, int vol, bool loop, uint32_t startSample) {
     if (!c || !c->pcm || c->len <= 0) return;
     if (vol <= 0) return;
     if (vol > 100) vol = 100;
@@ -181,16 +189,21 @@ static void startClip(int tag, const SndClip* c, int vol, bool loop) {
     if (!v) v = allocVoice();
     if (!v) return;
     v->clip = c;
-    v->pos = 0;
+    if (startSample >= (uint32_t)c->len) startSample = 0;
+    v->pos = (uint64_t)startSample << 16;
     v->step = (uint32_t)(((uint64_t)(uint32_t)c->rate << 16) / SND_OUT_RATE);
     if (v->step == 0) v->step = 1;
-    v->end = (uint32_t)c->len << 16;
+    v->end = (uint64_t)c->len << 16;
     v->vol = vol * 256 / 100 * SND_MASTER / 100;
     v->env = 0;
     v->loop = loop;
     v->active = true;
     v->tag = tag;
     v->age = ++mixClock;
+}
+
+static void startClip(int tag, const SndClip* c, int vol, bool loop) {
+    startClipAt(tag, c, vol, loop, 0);
 }
 
 static bool voiceActive(void) {
@@ -217,6 +230,13 @@ void Snd_init(void) {
             }
         }
     }
+    /* Radio randomness is deliberately independent of Fx_seed so the
+       simulation stays bit-identical to the J2ME reference. */
+    radioSeed ^= (uint32_t)System_currentTimeMillis() * 2654435761u;
+    if (radioSeed == 0) radioSeed = 0x13579BDFu;
+    radioPlaying = false;
+    radioPrepared = false;
+    radioRetryMs = 0;
     /* Keep the RNG sequence identical to the original Snd.voice even when a
        WAV is missing or playback is disabled. */
     Snd_ok = true;
@@ -277,6 +297,84 @@ void Snd_siren(bool onNow) {
     else Snd_stop(SND_SIREN);
 }
 
+/* The WAVs are loaded one at a time so the 15 clips do not pin ~29 MiB of
+   decoded PCM in the 58 MiB device heap.  The next clip is prepared when the
+   player starts walking to a car, hiding the SD read behind the get-in
+   animation. */
+static int radioPickTrack(void) {
+    radioSeed = radioSeed * 1664525u + 1013904223u;
+    return (int)((radioSeed >> 8) % SND_RADIO_TRACKS);
+}
+
+static bool radioLoadTrack(int idx) {
+    if (idx == radioLoaded && radioClip.pcm && radioClip.len > 0) return true;
+    Snd_stop(SND_RADIO_TAG);           /* never free PCM under a live voice */
+    clipFree(&radioClip);
+    radioLoaded = -1;
+    char path[64];
+    snprintf(path, sizeof(path), "/radio/%02d.wav", idx + 1);
+    if (!clipLoad(path, &radioClip)) return false;
+    radioLoaded = idx;
+    return true;
+}
+
+/* Start the loaded clip at a random offset, leaving at least 30 s to play. */
+static void radioStartLoaded(void) {
+    if (!radioClip.pcm || radioClip.len <= 0) return;
+    radioSeed = radioSeed * 1664525u + 1013904223u;
+    int guard = radioClip.rate * 30;
+    int maxStart = radioClip.len > guard ? radioClip.len - guard : 0;
+    uint32_t start = maxStart > 0 ? (radioSeed % (uint32_t)maxStart) : 0;
+    startClipAt(SND_RADIO_TAG, &radioClip, 55, false, start);
+}
+
+static void radioPlayOne(void) {
+    int idx = radioPickTrack();
+    if (!radioLoadTrack(idx)) return;
+    radioStartLoaded();
+}
+
+void Snd_radioPrepare(void) {
+    if (radioPrepared || !Snd_ok || !Snd_on) return;
+    int idx = radioPickTrack();
+    if (radioLoadTrack(idx)) radioPrepared = true;
+}
+
+void Snd_radioStart(void) {
+    radioPlaying = true;
+    radioRetryMs = 0;
+    if (!Snd_ok || !Snd_on) return;
+    if (!radioPrepared || !radioClip.pcm) {
+        int idx = radioPickTrack();
+        if (!radioLoadTrack(idx)) return;
+    }
+    radioPrepared = false;
+    radioStartLoaded();
+}
+
+void Snd_radioStop(void) {
+    radioPlaying = false;
+    radioRetryMs = 0;
+    Snd_stop(SND_RADIO_TAG);
+}
+
+/* Called once per game frame while driving.  When a clip reaches its end a
+   new random clip/offset starts, so long drives keep the station playing. */
+void Snd_radioTick(int dtMs) {
+    if (!radioPlaying || !Snd_ok || !Snd_on) return;
+    if (findTag(SND_RADIO_TAG) != NULL) return;
+    if (radioRetryMs > 0) {
+        radioRetryMs -= dtMs;
+        return;
+    }
+    radioPlayOne();
+    if (findTag(SND_RADIO_TAG) == NULL) radioRetryMs = 1000;
+}
+
+bool Snd_radioActive(void) {
+    return findTag(SND_RADIO_TAG) != NULL;
+}
+
 void Snd_stop(int id) {
     for (int i = 0; i < SND_MAX_MIX; i++) {
         if (mixv[i].active && mixv[i].tag == id) mixv[i].active = false;
@@ -300,7 +398,7 @@ void Snd_mix(int16_t* out, int frames, int rate) {
             MixVoice* v = &mixv[j];
             if (!v->active) continue;
             const SndClip* c = v->clip;
-            uint32_t idx = v->pos >> 16;
+            uint32_t idx = (uint32_t)(v->pos >> 16);
             if (idx >= (uint32_t)c->len) {
                 if (v->loop) {
                     v->pos = 0;
@@ -317,9 +415,9 @@ void Snd_mix(int16_t* out, int frames, int rate) {
             int32_t s = s0 + ((((s1 - s0) >> 8) * (frac >> 8)) >> 8);
             int env = v->env;
             if (!v->loop) {
-                uint32_t left = v->end > v->pos ? v->end - v->pos : 0;
+                uint64_t left = v->end > v->pos ? v->end - v->pos : 0;
                 uint32_t fade = (uint32_t)v->step * 96u;
-                if (left < fade) env = (int)((left * 256u) / (fade ? fade : 1u));
+                if (left < (uint64_t)fade) env = (int)((uint32_t)left * 256u / (fade ? fade : 1u));
             }
             acc += (s * ((v->vol * env) >> 8)) >> 8;
             if (v->env < 256) v->env += 8;
@@ -346,5 +444,10 @@ void Snd_cleanup(void) {
             clipFree(&voiceF[k][i]);
         }
     }
+    clipFree(&radioClip);
+    radioLoaded = -1;
+    radioPlaying = false;
+    radioPrepared = false;
+    radioRetryMs = 0;
     Snd_ok = false;
 }

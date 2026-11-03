@@ -543,6 +543,12 @@ void World_update(World* w, int dt, int keys, bool fire, bool enter, bool toggle
     World_pools_rotatePools(w, dt);
     World_missionUpdate(w, dt);
 
+    bool radioNow = (w->inCar != NULL) && w->radioEnabled;
+    if (radioNow && !w->radioInCar) Snd_radioStart();
+    else if (!radioNow && w->radioInCar) Snd_radioStop();
+    w->radioInCar = radioNow;
+    if (radioNow) Snd_radioTick(dt);
+
     if (w->busted) {
         w->bustedT += dt;
         World_updateWorld(w, dt);

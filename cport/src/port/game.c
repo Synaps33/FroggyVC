@@ -21,7 +21,7 @@ static const char* PAUSE_ITEMS[] = { "resume", "start new game", "map", "stats",
 static const char* DBG_ITEMS[] = { "spawn car", "time of day", "tommy speed", "game speed", "god mode", "clear wanted level", "give weapons + $5000", "teleport to spawn", "back" };
 static const char* OPT_NAMES[] = { "brightness", "draw distance", "frame limiter", "ps2 filter", "subtitles", "wide screen",
                                    "map legend", "radar mode", "hud mode", "traffic density", "screen resolution",
-                                   "restore defaults", "back" };
+                                   "radio", "restore defaults", "back" };
 
 static const char* CREDIT = "A Port made by AidenCantCode";
 static void applyOptions(Game* g, bool fill);
@@ -46,6 +46,7 @@ Game* Game_new(void) {
     g->oWide = false;
     g->oLegend = false;
     g->oHud = true;
+    g->oRadio = true;
     g->rs = 1;
     g->needResize = true;
     g->running = true;
@@ -463,6 +464,11 @@ static void fillPopulation(World* w) {
 static void applyOptions(Game* g, bool fill) {
     if (!g->world) return;
     World* w = g->world;
+    w->radioEnabled = g->oRadio;
+    if (!g->oRadio) {
+        Snd_radioStop();
+        w->radioInCar = false;
+    }
     w->brightness = g->oBright * 14 / 15;
     w->drawDist = 60 + g->oDraw * 12;
     if (g->oDensity == 0) {
@@ -511,12 +517,12 @@ void Game_refreshOptions(Game* g) {
 }
 
 static void doOptions(Game* g, int e) {
-    int n = 13;
+    int n = 14;
     bool changed = false;
     if ((e & GAME_A_UP) != 0) g->optSel = (g->optSel + n - 1) % n;
     if ((e & GAME_A_DOWN) != 0) g->optSel = (g->optSel + 1) % n;
     int dlt = ((e & GAME_A_RIGHT) != 0 ? 1 : 0) - ((e & GAME_A_LEFT) != 0 ? 1 : 0);
-    if ((e & GAME_A_FIRE) != 0 && g->optSel < 11) dlt = 1;
+    if ((e & GAME_A_FIRE) != 0 && g->optSel < 12) dlt = 1;
     if (dlt != 0) {
         changed = true;
         switch (g->optSel) {
@@ -531,16 +537,17 @@ static void doOptions(Game* g, int e) {
             case 8: g->oHud = !g->oHud; break;
             case 9: g->oDensity = (g->oDensity + 4 + dlt) % 4; break;
             case 10: g->oRes = (g->oRes + 1) % 4; g->needResize = true; break;
+            case 11: g->oRadio = !g->oRadio; break;
             default: break;
         }
     }
-    if ((e & GAME_A_FIRE) != 0 && g->optSel == 11) {
+    if ((e & GAME_A_FIRE) != 0 && g->optSel == 12) {
         g->oBright = 10; g->oDraw = g->legacy ? 4 : 8; g->oLimiter = true; g->oTrails = false;
         g->oSubs = true; g->oWide = false; g->oLegend = false; g->oRadar = 0;
-        g->oHud = true; g->oRes = g->legacy ? 2 : 0; g->oDensity = 1; g->needResize = true;
+        g->oHud = true; g->oRadio = true; g->oRes = g->legacy ? 2 : 0; g->oDensity = 1; g->needResize = true;
         changed = true;
     }
-    bool leaving = ((e & GAME_A_FIRE) != 0 && g->optSel == 12) || (e & GAME_A_PAUSE) != 0;
+    bool leaving = ((e & GAME_A_FIRE) != 0 && g->optSel == 13) || (e & GAME_A_PAUSE) != 0;
     if (leaving) {
         g->state = (g->prevState == GAME_S_PAUSE) ? GAME_S_PAUSE : GAME_S_MENU;
     }
@@ -554,7 +561,7 @@ static void doOptions(Game* g, int e) {
     for (int i = 0; i < n; i++) {
         int y = y0 + i * step;
         if (i == g->optSel) Ui_fill(g->scr, g->W, g->H, x0 - 4 * g->u, y - g->u, xr - x0 + 8 * g->u, 11 * g->u, UI_HILITE);
-        if (i >= 11) {
+        if (i >= 12) {
             Ui_textC(g->scr, g->W, g->H, g->W / 2, y, OPT_NAMES[i], UI_PINK, g->u);
             continue;
         }
@@ -571,7 +578,7 @@ static void doOptions(Game* g, int e) {
             case 8: Ui_textR(g->scr, g->W, g->H, xr, y, g->oHud ? "on" : "off", UI_PINK, g->u); break;
             case 9: Ui_textR(g->scr, g->W, g->H, xr, y,
                              g->oDensity == 0 ? "low" : (g->oDensity == 1 ? "medium" : (g->oDensity == 2 ? "high" : "very high")), UI_PINK, g->u); break;
-            default: {
+            case 10: {
                 char buf[32];
                 int rw = g->W, rh = g->H;
                 if (g->oRes == 1) { rw = g->W * 3 / 4; rh = g->H * 3 / 4; }
@@ -581,6 +588,8 @@ static void doOptions(Game* g, int e) {
                 Ui_textR(g->scr, g->W, g->H, xr, y, buf, UI_PINK, g->u);
                 break;
             }
+            case 11: Ui_textR(g->scr, g->W, g->H, xr, y, g->oRadio ? "on" : "off", UI_PINK, g->u); break;
+            default: break;
         }
     }
     Ui_textR(g->scr, g->W, g->H, g->W - 6 * g->u, g->H - 11 * g->u, "left, right to adjust", 0xE0E0E0, 1);
@@ -904,8 +913,10 @@ void Game_frame(Game* g, int dt) {
         default: break;
     }
     if (stateBefore == GAME_S_PLAY && g->state != GAME_S_PLAY) {
-        /* Do not leave an engine/siren loop running behind the pause menu. */
+        /* Do not leave an engine/siren/radio loop running behind the pause menu. */
         Snd_stopAll();
+        Snd_radioStop();
+        if (g->world) g->world->radioInCar = false;
     }
 
     if (g->state == GAME_S_MENU && g->fadeMs < 900) {

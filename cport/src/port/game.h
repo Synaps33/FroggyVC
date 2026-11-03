@@ -58,7 +58,7 @@ typedef struct Game {
     int sel, menuSel;
     int optSel;
     int oBright, oDraw, oRadar, oRes, oDensity;
-    bool oLimiter, oTrails, oSubs, oWide, oLegend, oHud;
+    bool oLimiter, oTrails, oSubs, oWide, oLegend, oHud, oRadio;
     int fps, fpsCount, fpsMs;
     int blink;
     int titleMs;

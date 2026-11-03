@@ -89,7 +89,7 @@ void Save_writeOptions(struct Game* g) {
     if (!g) return;
     DataOutputStream d;
     dos_init(&d);
-    dos_writeInt(&d, 1);              /* version */
+    dos_writeInt(&d, 2);              /* version */
     dos_writeInt(&d, g->oBright);
     dos_writeInt(&d, g->oDraw);
     dos_writeBoolean(&d, g->oLimiter);
@@ -101,6 +101,7 @@ void Save_writeOptions(struct Game* g) {
     dos_writeBoolean(&d, g->oHud);
     dos_writeInt(&d, g->oDensity);
     dos_writeInt(&d, g->oRes);
+    dos_writeBoolean(&d, g->oRadio);
 
     RecordStore* rs = RecordStore_openRecordStore(OPT_NAME, true);
     if (rs) {
@@ -120,7 +121,7 @@ bool Save_loadOptions(struct Game* g) {
     if (!rs) return false;
     int len = 0;
     const uint8_t* b = RecordStore_getRecord(rs, 1, &len);
-    /* version + 2 ints + 5 bools + int + bool + 2 ints = 30 bytes */
+    /* v1 = 30 bytes, v2 adds the radio flag (31 bytes). */
     if (!b || len < 30) {
         RecordStore_closeRecordStore(rs);
         return false;
@@ -128,7 +129,8 @@ bool Save_loadOptions(struct Game* g) {
 
     DataInputStream d;
     dis_init(&d, b, len);
-    bool ok = dis_readInt(&d) == 1;
+    int ver = dis_readInt(&d);
+    bool ok = (ver == 1 || ver == 2);
     int bright = dis_readInt(&d);
     int draw = dis_readInt(&d);
     bool limiter = dis_readBoolean(&d);
@@ -140,6 +142,8 @@ bool Save_loadOptions(struct Game* g) {
     bool hud = dis_readBoolean(&d);
     int density = dis_readInt(&d);
     int res = dis_readInt(&d);
+    bool radio = true;
+    if (ver >= 2 && dis_available(&d) >= 1) radio = dis_readBoolean(&d);
     dis_close(&d);
     RecordStore_closeRecordStore(rs);
     if (!ok) return false;
@@ -155,6 +159,7 @@ bool Save_loadOptions(struct Game* g) {
     g->oWide = wide;
     g->oLegend = legend;
     g->oHud = hud;
+    g->oRadio = radio;
     g->needResize = true;
     return true;
 }

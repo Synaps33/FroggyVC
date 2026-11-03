@@ -123,6 +123,7 @@ typedef struct World {
     char missionText[96];
     bool missionDone;
     Mesh* missionMarker;
+    bool radioEnabled, radioInCar;
     int quietKills, quietLimit;
     int wantedCalmT;
     int minutes, clockMs;

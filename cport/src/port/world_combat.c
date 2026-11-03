@@ -167,6 +167,7 @@ void World_handleEnter(World* w) {
         }
     }
     if (best != NULL) {
+        if (w->radioEnabled) Snd_radioPrepare();
         w->pActCar = best;
         w->pAct = WORLD_PA_WALKTO;
         w->player->clip = -1;

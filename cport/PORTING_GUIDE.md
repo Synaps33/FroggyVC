@@ -171,9 +171,13 @@ Other target-side changes:
 - `Intro` uses a video stub because the multicore core has no MMAPI video
   player; the original already treats a missing `intro.3gp` as "skip".
 - `Snd` keeps the original state machine and file table and adds a small
-  integer WAV mixer.  Effects/voices are resampled to 44100 Hz and mixed into
-  the libretro audio batch; engine/siren loops use the original hysteresis.
-  No FPU is used.
+  integer WAV mixer plus an in-car radio player (15 optional two-minute
+  clips in `assets/radio`).  Pressing enter near a car loads a random clip
+  during the walk-to-door animation; entering starts it at a random offset,
+  the next clip starts when it ends, and exiting stops it.  The radio option
+  is saved with the other settings.  Only one clip is decoded at a time.
+  Effects/voices are resampled to 44100 Hz and mixed into the libretro audio
+  batch; engine/siren loops use the original hysteresis.  No FPU is used.
 - `legacy.txt` (created by the SD installer) enables the upstream
   `Assets.legacy` configuration: half-resolution 3D, smaller model pools and
   a 1-tile streaming ring. This is original game code, not a new mode.

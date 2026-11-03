@@ -221,6 +221,19 @@ int main(int argc, char** argv) {
             }
         }
         Snd_stopAll();
+        Snd_radioStart();
+        for (int i = 0; i < 20; i++) {
+            Snd_mix(abuf, 735, 44100);
+            if (f) fwrite(abuf, sizeof(int16_t), 735 * 2, f);
+            for (int k = 0; k < 735 * 2; k++) {
+                int v = abuf[k] < 0 ? -abuf[k] : abuf[k];
+                if (v > maxv) maxv = v;
+                sum += (int64_t)abuf[k] * abuf[k];
+                ns++;
+            }
+        }
+        Snd_radioStop();
+        Snd_stopAll();
         if (f) fclose(f);
         int rms = ns ? (int)Fx_isqrt((uint64_t)(sum / (ns ? ns : 1))) : 0;
         printf("AUDIOTEST clips max=%d rms=%d samples=%d -> %s\n", maxv, rms, ns, maxv > 100 ? "PASS" : "FAIL");
@@ -238,19 +251,20 @@ int main(int argc, char** argv) {
         g->oLegend = true;
         g->oRadar = 2;
         g->oHud = false;
+        g->oRadio = false;
         g->oDensity = 2;
         g->oRes = 3;
         Save_writeOptions(g);
         g->oBright = 10; g->oDraw = 4; g->oLimiter = true; g->oTrails = false;
         g->oSubs = true; g->oWide = false; g->oLegend = false; g->oRadar = 0;
-        g->oHud = true; g->oDensity = 0; g->oRes = 1;
+        g->oHud = true; g->oRadio = true; g->oDensity = 0; g->oRes = 1;
         bool ok = Save_loadOptions(g);
         bool pass = ok && g->oBright == 3 && g->oDraw == 7 && !g->oLimiter &&
                     g->oTrails && !g->oSubs && g->oWide && g->oLegend &&
-                    g->oRadar == 2 && !g->oHud && g->oDensity == 2 && g->oRes == 3;
-        printf("OPTSTEST load=%d bright=%d draw=%d limiter=%d trails=%d subs=%d wide=%d legend=%d radar=%d hud=%d density=%d res=%d -> %s\n",
+                    g->oRadar == 2 && !g->oHud && !g->oRadio && g->oDensity == 2 && g->oRes == 3;
+        printf("OPTSTEST load=%d bright=%d draw=%d limiter=%d trails=%d subs=%d wide=%d legend=%d radar=%d hud=%d radio=%d density=%d res=%d -> %s\n",
                ok, g->oBright, g->oDraw, g->oLimiter, g->oTrails, g->oSubs, g->oWide,
-               g->oLegend, g->oRadar, g->oHud, g->oDensity, g->oRes, pass ? "PASS" : "FAIL");
+               g->oLegend, g->oRadar, g->oHud, g->oRadio, g->oDensity, g->oRes, pass ? "PASS" : "FAIL");
         return pass ? 0 : 1;
     }
 
@@ -338,6 +352,59 @@ int main(int argc, char** argv) {
             if (!loaded || !w->missionDone || w->missionState != WORLD_MISSION_PASSED) return 1;
         }
         return (w->missionState == WORLD_MISSION_PASSED && w->missionDone) ? 0 : 1;
+    }
+
+    if (getenv("GTAVC_RADIOTEST") && w) {
+        /* Spawn a car at the player's feet, use the real enter/exit path and
+           verify that the radio follows radioEnabled and the vehicle state. */
+        g->oRadio = true;
+        Game_refreshOptions(g);
+        World_placePlayerAtSpawn(w);
+        w->inCar = NULL; w->player->seat = NULL; w->pAct = 0;
+        w->radioInCar = false;
+        World_preload(w, w->player->x, w->player->z);
+        World_findSpot(w, 4, 18, WORLD_S_ROAD);
+        Car* rc = World_addCar(w, CAR_PARKED, 1, w->spot[0], w->spot[1], 0, 0);
+        if (!rc) { printf("RADIOTEST spawn -> FAIL\n"); return 1; }
+        w->player->x = rc->x; w->player->z = rc->z;
+        w->player->y = World_groundH(w, rc->x, rc->z, rc->y);
+        Game_press(g, GAME_A_ENTER);
+        Game_frame(g, 33); g->down = 0;
+        bool quietWhileWalking = !Snd_radioActive();
+        frames(120);
+        bool inCar = w->inCar != NULL;
+        bool on = inCar && w->radioInCar && Snd_radioActive();
+        printf("RADIOTEST enter car=%d flag=%d active=%d quietWalk=%d\n",
+               inCar, w->radioInCar, Snd_radioActive(), quietWhileWalking);
+        shot("radio_car");
+
+        g->oRadio = false;
+        Game_refreshOptions(g);
+        frames(3);
+        bool off = !w->radioEnabled && !w->radioInCar && !Snd_radioActive();
+        printf("RADIOTEST option off enabled=%d flag=%d active=%d\n", w->radioEnabled, w->radioInCar, Snd_radioActive());
+
+        g->oRadio = true;
+        Game_refreshOptions(g);
+        frames(8);
+        bool resumed = w->radioEnabled && w->radioInCar && Snd_radioActive();
+        printf("RADIOTEST option on enabled=%d flag=%d active=%d\n", w->radioEnabled, w->radioInCar, Snd_radioActive());
+
+        Game_press(g, GAME_A_ENTER);
+        Game_frame(g, 33); g->down = 0;
+        frames(120);
+        bool exited = w->inCar == NULL && !w->radioInCar && !Snd_radioActive();
+        printf("RADIOTEST exit car=%d flag=%d active=%d\n", w->inCar != NULL, w->radioInCar, Snd_radioActive());
+
+        g->state = GAME_S_OPT;
+        g->prevState = GAME_S_PAUSE;
+        g->optSel = 11;
+        Game_frame(g, 33);
+        shot("options_radio");
+        g->state = GAME_S_PLAY;
+        bool pass = quietWhileWalking && on && off && resumed && exited;
+        printf("RADIOTEST enter/off/on/exit -> %s\n", pass ? "PASS" : "FAIL");
+        return pass ? 0 : 1;
     }
 
     if (getenv("GTAVC_TILECACHE") && w) {

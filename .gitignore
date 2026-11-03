@@ -12,3 +12,4 @@ screenshots_mips/
 *.sf2k
 __pycache__/
 *.pyc
+cport/assets/radio/

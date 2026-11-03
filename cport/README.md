@@ -133,7 +133,7 @@ spawner now only picks ped slots that actually have a loaded model, so a
 density change is reflected immediately and fewer pedestrians vanish.
 
 All display options (brightness, draw distance, limiter, filter, subtitles,
-wide screen, legend, radar, HUD, density, resolution) are stored in
+wide screen, legend, radar, HUD, density, resolution, radio) are stored in
 `te_gtavc_opts.rms` next to the game and restored on the next boot.  They are
 written when changed, when leaving the options screen, and on exit.
 
@@ -153,8 +153,20 @@ frontend averages the two channels.  Effects are 11025 Hz 16-bit; voices are
 the original 0.7 s engine hysteresis.  `Snd_mix` is integer-only (no FPU) and
 mixes up to 12 simultaneous voices.
 
-`GTAVC_AUDIOTEST=1` loads the clips, mixes gun/bat/siren/engine/voice, and
-writes the mixed stream to `/tmp/gtavc_audio.raw` for inspection.
+`GTAVC_AUDIOTEST=1` loads the clips, mixes gun/bat/siren/engine/voice/radio,
+and writes the mixed stream to `/tmp/gtavc_audio.raw` for inspection.
+
+### Radio
+
+Fifteen two-minute Flash FM clips can be placed in `assets/radio/01.wav` …
+`15.wav` (8 kHz mono).  Pressing enter next to a car prepares a random clip
+while Tommy walks to it, so the SD read is hidden by the get-in animation.
+Sitting in the car starts that clip at a random offset; when it ends another
+random clip starts, and exiting stops the radio.  `Options -> radio` turns the
+in-car radio off and the setting is saved with the other options.  Only one
+clip is decoded at a time to keep the device heap free.  The Flash FM clips
+are copyrighted audio and are **not** part of the public repository or
+release; the code loads them from `assets/radio` when present.
 
 ## First mission: An Old Friend
 

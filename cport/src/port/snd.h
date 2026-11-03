@@ -39,6 +39,11 @@ void Snd_engine(bool running, int pct);
 void Snd_siren(bool onNow);
 void Snd_stop(int id);
 void Snd_stopAll(void);
+void Snd_radioPrepare(void);
+void Snd_radioStart(void);
+void Snd_radioStop(void);
+void Snd_radioTick(int dtMs);
+bool Snd_radioActive(void);
 void Snd_mix(int16_t* out, int frames, int rate);
 void Snd_cleanup(void);
 

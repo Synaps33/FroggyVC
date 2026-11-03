@@ -175,8 +175,15 @@ screenshots remain pixel-identical.
 ### Audio and streaming caches
 
 `GTAVC_AUDIOTEST=1` reports `PASS` on the host and MIPS32 soft-float builds;
-the mixed stream peaks around 32k with non-zero RMS for gun, bat, siren,
-engine and voice segments.  ASan is clean.
+the mixed stream peaks around 22k with non-zero RMS for gun, bat, siren,
+engine, voice and radio segments.  ASan is clean.
+
+`GTAVC_RADIOTEST=1` drives the real enter/exit paths and reports `PASS` on
+host and MIPS32 soft-float: the radio stays silent while walking to the car,
+plays after entering, stops when `Options -> radio` is switched off, resumes
+when it is switched on, and stops on exit.  `GTAVC_OPTSTEST=1` confirms the
+radio flag survives the save/load round-trip; options from version 1 saves
+default to radio on.
 
 `tools/predecode_textures.py` produced 3165 raw 32x32 textures (12.4 MB).
 `GTAVC_TILECACHE=1` produced 1216 pre-split tile caches (71 MB) in ~21 s on
