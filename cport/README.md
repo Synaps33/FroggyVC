@@ -146,11 +146,15 @@ instead of backwards.  The pistol attachment is unchanged.
 
 ## Multi-layer elevation & bridge traversal
 
-- **Two-layer ground stability**: `World_hCell` only switches to the lower
-  surface `b` when an entity is genuinely down on the lower floor
-  (`y <= b + 120`, `a > y + 140` and `b > -70`).  Upper roads, parking garage
-  roofs, piers and elevated decks are 100% solid; driving on them no longer
-  becomes permeable or drops the car into the lower floor or seabed water.
+- **Two-layer ground stability & midpoint resolution**: `World_hCell` resolves
+  the two-layer heightfield using a robust vertical midpoint rule `(a + b) / 2`:
+  entities in the lower half (underpasses, tunnels, covered parking, roads
+  passing under archways and footbridges) reliably stay on the lower floor `b`,
+  never teleporting to the roof or sky. Entities in the upper half (overpasses,
+  highways, bridge decks, parking roofs) stay on the upper surface `a` even when
+  the surface slopes upward, never falling through into lower floors. Above water
+  (`y > -70`), seabed heights (`b < -70`) are never selected as walking floors,
+  preventing water drownings on bridges and piers.
 - **Ramp traversal & stunt jumps**: `World_moveCar` distinguishes real walls
   (buildings with roof heights > 4.7 m) from driveable ramps (height rise
   <= 4.3 m where the slope continues upward, or bridge/road decks). Cars can

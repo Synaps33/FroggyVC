@@ -38,12 +38,12 @@ int World_hCell(World* w, int gi, int gj, int y) {
        Above water, the only valid ground is the deck (bridge, pier, dock). */
     if (b < -70 && y > -70) return a;
 
-    /* An entity is genuinely on the lower level (underpass, inside parking)
-       only when it is down near the lower floor: y is within 1.9 m of b,
-       and the upper deck a is overhead with headroom. */
-    if (b > -70 && y <= b + 120 && a > y + 140) {
-        return b;
-    }
+    /* Midpoint rule: if entity is in the lower half of the vertical gap
+       (underpass, tunnel, inside parking, road under archway), select the
+       lower floor b. If in the upper half (overpass, bridge deck, parking roof),
+       select the upper surface a. */
+    int mid = (a + b) / 2;
+    if (y <= mid) return b;
     return a;
 }
 
