@@ -414,8 +414,8 @@ int main(int argc, char** argv) {
         /* 1. High bridge ascent: spawn car at foot of high bridge ramp
               and drive onto the high bridge deck over water. */
         int bx = -52224, bz = 99328;
-        int by = World_groundH(w, bx, bz, 4000);
         World_preload(w, bx, bz);
+        int by = World_groundH(w, bx, bz, 4000);
         w->player->x = bx; w->player->z = bz; w->player->y = by;
         Car* bc = World_addCar(w, CAR_PARKED, 1, bx, bz, 716, 0); 
         if (!bc) { printf("BRIDGETEST addCar failed\n"); return 1; }

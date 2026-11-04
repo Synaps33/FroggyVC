@@ -32,25 +32,28 @@ int World_hCell(World* w, int gi, int gj, int y) {
     int a = t->top[k];
     if (a == -32768) return -640;
     int b = t->low ? t->low[k] : -32768;
-    if (b == -32768 || b == a) return a;
 
     /* 1. Above water, the seabed (b < -70) is never a walkable floor.
           Bridges, piers, and docks over water always return the deck a. */
     if (b < -70 && y > -70) return a;
 
-    /* 2. If the entity is on the upper deck (driving on an elevated highway,
-          overpass, bridge, or parking roof), it is far above the lower floor
-          and close to the upper surface a. It must remain on a even when
-          a slopes upward, never falling through into lower floors. */
-    if (y > b + 90 && (a - y) < (y - b)) {
-        return a;
+    /* 2. Two distinct layers: ceiling a and floor b. */
+    if (b != -32768 && b != a && b > -70) {
+        /* On the upper deck (driving on elevated highway, overpass, bridge, roof) */
+        if (y > b + 90 && (a - y) < (y - b)) {
+            return a;
+        }
+        /* Ceiling is overhead (inside underground parking, under archway/bridge) */
+        if (a > y + 70) {
+            return b;
+        }
     }
 
-    /* 3. If a is overhead (a > y + 70), the entity is underneath
-          (under a tree canopy, archway, footbridge, inside underground parking,
-          or driving under a bridge). Return the lower floor b. */
-    if (a > y + 70) {
-        return b;
+    /* 3. Single-layer cell (palm tree crown, tree canopy, overhead prop):
+          If a is far above the entity (> 2.5 m above y), the entity is
+          underneath it on the ground. Never teleport or spawn onto treetops! */
+    if (a > y + 160) {
+        return y;
     }
 
     return a;
