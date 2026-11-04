@@ -311,13 +311,13 @@ void World_updateOnFoot(World* w, int dt, int keys, bool fire) {
     /* The console map represents kerbs and stair steps more coarsely than
        the phone tiles; allow a small climb instead of treating every step as
        a wall. */
-    int ox = p->x, oz = p->z, lim = p->air ? 20 : 150;
-    if (!World_stepAllowed(w, w->rx, w->rz, gCur, lim)) {
+    int ox = p->x, oz = p->z, lim = p->air ? 20 : 72;
+    if (World_groundH(w, w->rx, w->rz, gCur + 40) - gCur > lim) {
         int nz = w->rz;
         w->rz = oz;
-        if (!World_stepAllowed(w, w->rx, w->rz, gCur, lim)) {
+        if (World_groundH(w, w->rx, w->rz, gCur + 40) - gCur > lim) {
             w->rx = ox; w->rz = nz;
-            if (!World_stepAllowed(w, w->rx, w->rz, gCur, lim)) {
+            if (World_groundH(w, w->rx, w->rz, gCur + 40) - gCur > lim) {
                 w->rx = ox; w->rz = oz;
             }
         }
@@ -354,7 +354,7 @@ void World_updateOnFoot(World* w, int dt, int keys, bool fire) {
             p->loco = w->cJumpG;
             p->locoT += dt;
         }
-        if (p->y <= gy && p->vy <= 0) {
+        if (p->y <= gy && gy <= gCur + 80 && p->vy <= 0) {
             p->y = gy;
             p->air = false;
             p->vy = 0;
@@ -367,7 +367,7 @@ void World_updateOnFoot(World* w, int dt, int keys, bool fire) {
     if (gy < p->y - 40) {
         p->air = true;
         p->vy = 0;
-    } else {
+    } else if (gy <= p->y + 72) {
         p->y = gy;
     }
 }

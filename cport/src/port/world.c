@@ -93,7 +93,7 @@ bool World_isBridgeAt(World* w, int xm, int zm) {
     if (!t || !t->top || !t->low || !t->surf) return false;
     int k = (gj % TILE_NH) * TILE_NH + (gi % TILE_NH);
     int top = t->top[k], low = t->low[k];
-    return (t->surf[k] == WORLD_S_ROAD || t->surf[k] == WORLD_S_PAVE) && (top > low + 80);
+    return t->surf[k] == WORLD_S_ROAD && top > -70 && low < -70;
 }
 
 /* A bridge deck over water can be several metres above the approach; do not
