@@ -317,7 +317,10 @@ int main(int argc, char** argv) {
         for (int i = 0; i < w->nped; i++) {
             Ped* p = &w->peds[i];
             if (p->seat != NULL || p->state == PED_DEAD) continue;
-            if (!World_spawnClear(w, p->x, p->z, 500)) badP++;
+            if (!World_spawnClear(w, p->x, p->z, 500)) {
+                badP++;
+                printf("FAIL PED %d at (%d, %d, %d)\n", i, p->x, p->z, p->y);
+            }
         }
         for (int i = 0; i < w->ncars; i++) {
             if (!World_spawnClear(w, w->cars[i].x, w->cars[i].z, 1300)) badC++;
@@ -466,6 +469,64 @@ int main(int argc, char** argv) {
 
         bool allPass = bridgePass && parkingPass;
         printf("BRIDGETEST bridge=%d parking=%d -> %s\n", bridgePass, parkingPass, allPass ? "PASS" : "FAIL");
+        return allPass ? 0 : 1;
+    }
+
+    if (getenv("GTAVC_RAMPTEST") && w) {
+        /* 1. Beach stunt ramp ascent:
+              Start in clear approach (z=-891000, y=329) and accelerate up the ramp. */
+        w->ncars = 0;
+        int rx = 177152, rz = -891000;
+        World_preload(w, rx, rz);
+        int ry = World_groundH(w, rx, rz, 4000);
+        w->player->x = rx; w->player->z = rz; w->player->y = ry;
+        Car* rc = World_addCar(w, CAR_PLAYER, 1, rx, rz, 0, 0);
+        if (!rc) { printf("RAMPTEST addCar failed\n"); return 1; }
+        rc->y = ry;
+        w->inCar = rc;
+        w->player->seat = rc;
+        w->pAct = 0;
+        frames(5);
+        printf("RAMPTEST start: x=%d z=%d y=%d (expect ~329)\n", w->inCar->x, w->inCar->z, w->inCar->y);
+
+        int maxY = w->inCar->y;
+        for (int i = 0; i < 140; i++) {
+            g->down = GAME_A_UP;
+            Game_frame(g, 33);
+            if (w->inCar && w->inCar->y > maxY) maxY = w->inCar->y;
+        }
+        g->down = 0;
+        Car* car = w->inCar;
+        if (!car) { printf("RAMPTEST lost car!\n"); return 1; }
+        printf("RAMPTEST climbed: x=%d z=%d y=%d maxY=%d speed=%d health=%d\n",
+               car->x, car->z, car->y, maxY, car->speed, w->health);
+        shot("ramp_beach");
+        bool rampPass = (maxY >= 450) && (car->z > rz + 3000) && (w->health > 80);
+
+        /* 2. Building wall test: drive East from Ken's alley into the building wall
+              at x=141312 and assert the car is stopped and does not penetrate. */
+        int wx = 137000, wz = -837200;
+        World_preload(w, wx, wz);
+        int wy = World_groundH(w, wx, wz, 4000);
+        car->x = wx; car->z = wz; car->y = wy; car->yaw = 256; car->speed = 0; car->vx = car->vz = 0;
+        w->player->x = wx; w->player->z = wz; w->player->y = wy;
+        printf("RAMPTEST wall approach: x=%d z=%d y=%d\n", car->x, car->z, car->y);
+
+        for (int i = 0; i < 60; i++) {
+            g->down = GAME_A_UP;
+            Game_frame(g, 33);
+            car = w->inCar;
+            if (!car) break;
+        }
+        g->down = 0;
+        if (!car) { printf("RAMPTEST lost car at wall!\n"); return 1; }
+        printf("RAMPTEST wall result: x=%d z=%d y=%d (blocked: %d, no roof: %d)\n",
+               car->x, car->z, car->y, car->x <= 140500, car->y < 350);
+        shot("wall_blocked");
+        bool wallPass = (car->x <= 140500) && (car->y < 350);
+
+        bool allPass = rampPass && wallPass;
+        printf("RAMPTEST ramp=%d wall=%d -> %s\n", rampPass, wallPass, allPass ? "PASS" : "FAIL");
         return allPass ? 0 : 1;
     }
 

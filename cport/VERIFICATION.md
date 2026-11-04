@@ -190,6 +190,10 @@ over water and along the elevated road above the parking structure.  Both
 report `PASS`: the car climbs the ramp smoothly without hitting invisible
 walls, does not fall into the parking garage, and suffers zero water drownings.
 
+`GTAVC_RAMPTEST=1` accelerates a car up the wooden beach stunt ramp and confirms
+the vehicle launches upward (reaching full ramp elevation) and also asserts that
+driving into a building wall correctly halts the vehicle without roof penetration.
+
 `tools/predecode_textures.py` produced 3165 raw 32x32 textures (12.4 MB).
 `GTAVC_TILECACHE=1` produced 1216 pre-split tile caches (71 MB) in ~21 s on
 the host.  With both caches present, host and MIPS screenshots are unchanged

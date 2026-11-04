@@ -184,9 +184,10 @@ Other target-side changes:
   and `b > -70`).  Upper decks never become permeable and water-bed heights are
   never returned above sea level.
 - `World_isBridgeAt` recognizes elevated decks and ramps over both land and
-  water (`top > low + 80`).  `World_moveCar` treats `WORLD_S_ROAD` ramps as
-  traversable roads, and `World_solidCell` ignores 3D bridge geometry artifacts
-  on roadways so cars can cross high bridges without blocking.
+  water (`top > low + 80`).  `World_moveCar` treats ramps and bridge decks as
+  traversable, distinguishing real walls (diff > 280) from slopes (diff <= 280
+  with forward continuation).  `World_solidCell` ignores 3D bridge and ramp
+  side-rail artifacts so cars can climb ramps and cross bridges smoothly.
 - `legacy.txt` (created by the SD installer) enables the upstream
   `Assets.legacy` configuration: half-resolution 3D, smaller model pools and
   a 1-tile streaming ring. This is original game code, not a new mode.

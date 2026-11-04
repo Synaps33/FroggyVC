@@ -151,13 +151,15 @@ instead of backwards.  The pistol attachment is unchanged.
   (`y <= b + 120`, `a > y + 140` and `b > -70`).  Upper roads, parking garage
   roofs, piers and elevated decks are 100% solid; driving on them no longer
   becomes permeable or drops the car into the lower floor or seabed water.
-- **High bridge ramp ascent**: `World_isBridgeAt` identifies ramps and decks on
-  both land and water (`top > low + 80`).  `World_moveCar` does not treat
-  steep `WORLD_S_ROAD` ramps as walls.
-- **Roadway collision clearing**: `World_solidCell` clears 3D model artifacts
-  (bridge cables, trusses, support pillars below) that fell onto
-  `WORLD_S_ROAD`, so cars can drive smoothly across all bridges and expressways
-  without hitting invisible barriers.
+- **Ramp traversal & stunt jumps**: `World_moveCar` distinguishes real walls
+  (buildings with roof heights > 4.7 m) from driveable ramps (height rise
+  <= 4.3 m where the slope continues upward, or bridge/road decks). Cars can
+  freely climb stunt ramps, beach ramps, parking ramps, and bridge approaches
+  without crashing into invisible 1.1-meter height barriers.
+- **Ramp side artifact clearing**: `World_solidCell` ignores steep 3D geometry
+  artifacts (bridge trusses, ramp side flanks, railings) on ramps and decks,
+  so cars do not catch side-rail collision boxes when driving onto ramps.
+- `GTAVC_RAMPTEST=1` verifies climbing stunt ramps and blocking at real building walls.
 - `GTAVC_BRIDGETEST=1` verifies driving up the high suspension bridge ramp
   onto the deck and traversing the elevated road above the parking garage.
 

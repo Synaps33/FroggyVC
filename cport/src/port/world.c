@@ -157,12 +157,31 @@ bool World_solidCell(World* w, int gi, int gj) {
     int li = gi % TILE_NS, lj = gj % TILE_NS;
     if ((t->solid[lj * TILE_SROW + (li >> 3)] & (0x80 >> (li & 7))) == 0) return false;
 
-    /* A roadway is for driving: ignore geometry artifacts (bridge trusses,
-       cables, pillars from below) that fell into the road surface. */
+    /* A roadway, bridge, ramp, or parking deck is for driving: ignore geometry
+       artifacts (bridge trusses, railings, ramp side flanks) on driveable surfaces. */
     int hi = gi / 2, hj = gj / 2;
     Tile* th = World_tileFor(w, hi, hj, TILE_NH);
-    if (th && th->surf && th->surf[(hj % TILE_NH) * TILE_NH + (hi % TILE_NH)] == WORLD_S_ROAD) {
-        return false;
+    if (th && th->surf && th->top && th->low) {
+        int k = (hj % TILE_NH) * TILE_NH + (hi % TILE_NH);
+        int s = th->surf[k];
+        if (s == WORLD_S_ROAD) return false;
+        if (s != WORLD_S_WATER) {
+            int diff = th->top[k] - th->low[k];
+            if (diff >= 50 && diff <= 280) return false; /* elevated ramp / parking floor */
+            if (diff < 50) {
+                /* check 4 cardinal neighbors for a ramp slope leading to a ramp/deck */
+                static const int nbr[4][2] = { {-1,0}, {1,0}, {0,-1}, {0,1} };
+                for (int n = 0; n < 4; n++) {
+                    int ni = (hi % TILE_NH) + nbr[n][0], nj = (hj % TILE_NH) + nbr[n][1];
+                    if (ni >= 0 && ni < TILE_NH && nj >= 0 && nj < TILE_NH) {
+                        int nk = nj * TILE_NH + ni;
+                        int ndiff = th->top[nk] - th->low[nk];
+                        int d = th->top[nk] - th->top[k];
+                        if (d > 35 && d <= 260 && ndiff <= 280) return false;
+                    }
+                }
+            }
+        }
     }
     return true;
 }

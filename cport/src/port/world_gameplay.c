@@ -151,17 +151,24 @@ void World_moveCar(World* w, Car* c, int dt) {
             c->z = w->rz - oz2;
         }
         int g = World_groundH(w, c->x + ox2, c->z + oz2, gHere);
-        bool frontOk = (World_surfAt(w, c->x + ox2, c->z + oz2) == WORLD_S_ROAD) ||
-                       World_stepAllowed(w, c->x + ox2, c->z + oz2, gHere, 130);
-        bool aheadOk = (World_surfAt(w, c->x + ox2 * 12 / 10, c->z + oz2 * 12 / 10) == WORLD_S_ROAD) ||
-                       World_stepAllowed(w, c->x + ox2 * 12 / 10, c->z + oz2 * 12 / 10, gHere, 130);
-        if (g > -60 && !frontOk && !aheadOk) {
-            w->dbgHit = 20 + k + g * 100;
-            hit = true;
-            nx += ox - c->x;
-            nz += oz - c->z;
-            c->x = ox;
-            c->z = oz;
+        int diff = g - gHere;
+        if (diff > 72 && g > -60) {
+            int gAhead = World_groundH(w, c->x + ox2 * 12 / 10, c->z + oz2 * 12 / 10, gHere);
+            int diffAhead = gAhead - gHere;
+            if (diffAhead > 72) {
+                int surf = World_surfAt(w, c->x + ox2, c->z + oz2);
+                bool isRamp = (surf == WORLD_S_ROAD) ||
+                              World_isBridgeAt(w, c->x + ox2, c->z + oz2) ||
+                              (diff <= 280 && gAhead >= g - 24 && surf != WORLD_S_WATER);
+                if (!isRamp) {
+                    w->dbgHit = 20 + k + g * 100;
+                    hit = true;
+                    nx += ox - c->x;
+                    nz += oz - c->z;
+                    c->x = ox;
+                    c->z = oz;
+                }
+            }
         }
     }
 
