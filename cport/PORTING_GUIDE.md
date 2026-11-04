@@ -178,11 +178,11 @@ Other target-side changes:
   is saved with the other settings.  Only one clip is decoded at a time.
   Effects/voices are resampled to 44100 Hz and mixed into the libretro audio
   batch; engine/siren loops use the original hysteresis.  No FPU is used.
-- `World_hCell` resolves the two-layer heightfield using the vertical midpoint
-  `(a + b) / 2`: entities in the lower half (underpasses, underground parking,
-  roads passing under overhead footbridges/archways) stay on the lower floor `b`,
-  while entities on elevated roads, bridges and roofs stay on the upper surface `a`
-  without falling through. Above water, seabed heights are ignored.
+- `World_hCell` resolves the two-layer heightfield: entities on elevated roads,
+  bridges and roofs stay on the upper surface `a` without falling through, while
+  entities under tree canopies, palms, footbridges, archways or inside underground
+  parking stay on the lower floor `b` without jumping to the canopy, roof or sky.
+  Above water, seabed heights are ignored.
 - `World_isBridgeAt` recognizes elevated decks and ramps over both land and
   water (`top > low + 80`).  `World_moveCar` treats ramps and bridge decks as
   traversable, distinguishing real walls (diff > 280) from slopes (diff <= 280

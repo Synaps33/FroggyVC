@@ -34,16 +34,25 @@ int World_hCell(World* w, int gi, int gj, int y) {
     int b = t->low ? t->low[k] : -32768;
     if (b == -32768 || b == a) return a;
 
-    /* If the lower surface is water or sea bed, nobody can walk or drive on it.
-       Above water, the only valid ground is the deck (bridge, pier, dock). */
+    /* 1. Above water, the seabed (b < -70) is never a walkable floor.
+          Bridges, piers, and docks over water always return the deck a. */
     if (b < -70 && y > -70) return a;
 
-    /* Midpoint rule: if entity is in the lower half of the vertical gap
-       (underpass, tunnel, inside parking, road under archway), select the
-       lower floor b. If in the upper half (overpass, bridge deck, parking roof),
-       select the upper surface a. */
-    int mid = (a + b) / 2;
-    if (y <= mid) return b;
+    /* 2. If the entity is on the upper deck (driving on an elevated highway,
+          overpass, bridge, or parking roof), it is far above the lower floor
+          and close to the upper surface a. It must remain on a even when
+          a slopes upward, never falling through into lower floors. */
+    if (y > b + 90 && (a - y) < (y - b)) {
+        return a;
+    }
+
+    /* 3. If a is overhead (a > y + 70), the entity is underneath
+          (under a tree canopy, archway, footbridge, inside underground parking,
+          or driving under a bridge). Return the lower floor b. */
+    if (a > y + 70) {
+        return b;
+    }
+
     return a;
 }
 

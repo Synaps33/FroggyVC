@@ -146,15 +146,16 @@ instead of backwards.  The pistol attachment is unchanged.
 
 ## Multi-layer elevation & bridge traversal
 
-- **Two-layer ground stability & midpoint resolution**: `World_hCell` resolves
-  the two-layer heightfield using a robust vertical midpoint rule `(a + b) / 2`:
-  entities in the lower half (underpasses, tunnels, covered parking, roads
-  passing under archways and footbridges) reliably stay on the lower floor `b`,
-  never teleporting to the roof or sky. Entities in the upper half (overpasses,
-  highways, bridge decks, parking roofs) stay on the upper surface `a` even when
-  the surface slopes upward, never falling through into lower floors. Above water
-  (`y > -70`), seabed heights (`b < -70`) are never selected as walking floors,
-  preventing water drownings on bridges and piers.
+- **Two-layer ground stability & overhead canopy handling**: `World_hCell`
+  resolves two-layer terrain: if an entity is on the upper deck (driving on an
+  elevated highway, overpass, bridge, or parking roof), it stays on the upper
+  surface `a` even across upward slopes, never falling through into lower floors.
+  If an obstacle is overhead (`a > y + 70`), the entity is underneath (under a
+  tree canopy, palm tree, archway, footbridge, or inside underground parking)
+  and reliably stays on the lower floor `b`. Entities under palm trees and
+  leaf canopies never teleport or spawn onto the treetop. Above water (`y > -70`),
+  seabed heights (`b < -70`) are never selected as walking floors, preventing
+  water drownings on bridges and piers.
 - **Ramp traversal & stunt jumps**: `World_moveCar` distinguishes real walls
   (buildings with roof heights > 4.7 m) from driveable ramps (height rise
   <= 4.3 m where the slope continues upward, or bridge/road decks). Cars can
