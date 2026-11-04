@@ -407,6 +407,68 @@ int main(int argc, char** argv) {
         return pass ? 0 : 1;
     }
 
+    if (getenv("GTAVC_BRIDGETEST") && w) {
+        /* 1. High bridge ascent: spawn car at foot of high bridge ramp
+              and drive onto the high bridge deck over water. */
+        int bx = -52224, bz = 99328;
+        int by = World_groundH(w, bx, bz, 4000);
+        World_preload(w, bx, bz);
+        w->player->x = bx; w->player->z = bz; w->player->y = by;
+        Car* bc = World_addCar(w, CAR_PARKED, 1, bx, bz, 716, 0); 
+        if (!bc) { printf("BRIDGETEST addCar failed\n"); return 1; }
+        bc->y = by;
+        w->inCar = bc;
+        bc->mode = CAR_PLAYER;
+        w->player->seat = bc;
+        w->pAct = 0;
+        frames(5);
+        if (!w->inCar) { printf("BRIDGETEST car entry failed\n"); return 1; }
+        Car* car = w->inCar;
+        printf("BRIDGETEST start: x=%d z=%d y=%d (expect ~660)\n", car->x, car->z, car->y);
+
+        /* Drive up the ramp towards the bridge deck */
+        for (int i = 0; i < 200; i++) {
+            g->down = GAME_A_UP;
+            Game_frame(g, 33);
+            car = w->inCar;
+            if (!car) break;
+        }
+        g->down = 0;
+        car = w->inCar;
+        if (!car) { printf("BRIDGETEST lost car on bridge!\n"); return 1; }
+        printf("BRIDGETEST on bridge: x=%d z=%d y=%d speed=%d drown=%d health=%d\n",
+               car->x, car->z, car->y, car->speed, w->drownT, w->health);
+        shot("bridge_high");
+        bool bridgePass = (car->x < bx - 10000) && (car->y > by + 20) && (w->drownT == 0) && (w->health > 80);
+
+        /* 2. Road over parking garage (Tile 20_14 col 33):
+              Drive along the elevated road over the parking lot. */
+        int px = 164864, pz = -683008;
+        World_preload(w, px, pz);
+        int py = World_groundH(w, px, pz, 4000);
+        car->x = px; car->z = pz; car->y = py; car->yaw = 0; car->speed = 0; car->vx = car->vz = 0;
+        w->player->x = px; w->player->z = pz; w->player->y = py;
+        printf("BRIDGETEST parking road start: x=%d z=%d y=%d (expect ~440)\n", car->x, car->z, car->y);
+
+        for (int i = 0; i < 150; i++) {
+            g->down = GAME_A_UP;
+            Game_frame(g, 33);
+            car = w->inCar;
+            if (!car) break;
+        }
+        g->down = 0;
+        car = w->inCar;
+        if (!car) { printf("BRIDGETEST lost car on parking road!\n"); return 1; }
+        printf("BRIDGETEST parking road end: x=%d z=%d y=%d speed=%d drown=%d health=%d\n",
+               car->x, car->z, car->y, car->speed, w->drownT, w->health);
+        shot("parking_road");
+        bool parkingPass = (car->y >= 350) && (w->drownT == 0) && (w->health > 80);
+
+        bool allPass = bridgePass && parkingPass;
+        printf("BRIDGETEST bridge=%d parking=%d -> %s\n", bridgePass, parkingPass, allPass ? "PASS" : "FAIL");
+        return allPass ? 0 : 1;
+    }
+
     if (getenv("GTAVC_TILECACHE") && w) {
         const char* dir = getenv("GTAVC_TILECACHE_DIR");
         if (!dir || !*dir) dir = "assets/tc";

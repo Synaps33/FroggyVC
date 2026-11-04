@@ -144,6 +144,23 @@ Tommy rotate onto his side.  `cPunch` now uses the animated, upright
 (its +x axis is the forearm axis) so the barrel points forward from the hand
 instead of backwards.  The pistol attachment is unchanged.
 
+## Multi-layer elevation & bridge traversal
+
+- **Two-layer ground stability**: `World_hCell` only switches to the lower
+  surface `b` when an entity is genuinely down on the lower floor
+  (`y <= b + 120`, `a > y + 140` and `b > -70`).  Upper roads, parking garage
+  roofs, piers and elevated decks are 100% solid; driving on them no longer
+  becomes permeable or drops the car into the lower floor or seabed water.
+- **High bridge ramp ascent**: `World_isBridgeAt` identifies ramps and decks on
+  both land and water (`top > low + 80`).  `World_moveCar` does not treat
+  steep `WORLD_S_ROAD` ramps as walls.
+- **Roadway collision clearing**: `World_solidCell` clears 3D model artifacts
+  (bridge cables, trusses, support pillars below) that fell onto
+  `WORLD_S_ROAD`, so cars can drive smoothly across all bridges and expressways
+  without hitting invisible barriers.
+- `GTAVC_BRIDGETEST=1` verifies driving up the high suspension bridge ramp
+  onto the deck and traversing the elevated road above the parking garage.
+
 ## Audio
 
 The core now decodes the original WAV effects and voice lines and mixes them

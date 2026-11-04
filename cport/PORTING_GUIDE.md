@@ -178,6 +178,15 @@ Other target-side changes:
   is saved with the other settings.  Only one clip is decoded at a time.
   Effects/voices are resampled to 44100 Hz and mixed into the libretro audio
   batch; engine/siren loops use the original hysteresis.  No FPU is used.
+- `World_hCell` resolves the two-layer heightfield so upper decks, parking
+  roofs, piers and bridges remain solid: it only selects the lower floor `b`
+  when the entity is actually down on that floor (`y <= b + 120`, `a > y + 140`
+  and `b > -70`).  Upper decks never become permeable and water-bed heights are
+  never returned above sea level.
+- `World_isBridgeAt` recognizes elevated decks and ramps over both land and
+  water (`top > low + 80`).  `World_moveCar` treats `WORLD_S_ROAD` ramps as
+  traversable roads, and `World_solidCell` ignores 3D bridge geometry artifacts
+  on roadways so cars can cross high bridges without blocking.
 - `legacy.txt` (created by the SD installer) enables the upstream
   `Assets.legacy` configuration: half-resolution 3D, smaller model pools and
   a 1-tile streaming ring. This is original game code, not a new mode.

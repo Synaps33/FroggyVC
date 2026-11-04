@@ -185,6 +185,11 @@ when it is switched on, and stops on exit.  `GTAVC_OPTSTEST=1` confirms the
 radio flag survives the save/load round-trip; options from version 1 saves
 default to radio on.
 
+`GTAVC_BRIDGETEST=1` drives a car up the high bridge ascent onto the deck
+over water and along the elevated road above the parking structure.  Both
+report `PASS`: the car climbs the ramp smoothly without hitting invisible
+walls, does not fall into the parking garage, and suffers zero water drownings.
+
 `tools/predecode_textures.py` produced 3165 raw 32x32 textures (12.4 MB).
 `GTAVC_TILECACHE=1` produced 1216 pre-split tile caches (71 MB) in ~21 s on
 the host.  With both caches present, host and MIPS screenshots are unchanged

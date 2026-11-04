@@ -31,10 +31,18 @@ int World_hCell(World* w, int gi, int gj, int y) {
     int k = (gj % TILE_NH) * TILE_NH + (gi % TILE_NH);
     int a = t->top[k];
     if (a == -32768) return -640;
-    if (a > y + 160) {
-        int b = t->low[k];
-        if (t->surf && t->surf[k] == WORLD_S_ROAD && b < -70) return a;
-        return b == -32768 ? -640 : b;
+    int b = t->low ? t->low[k] : -32768;
+    if (b == -32768 || b == a) return a;
+
+    /* If the lower surface is water or sea bed, nobody can walk or drive on it.
+       Above water, the only valid ground is the deck (bridge, pier, dock). */
+    if (b < -70 && y > -70) return a;
+
+    /* An entity is genuinely on the lower level (underpass, inside parking)
+       only when it is down near the lower floor: y is within 1.9 m of b,
+       and the upper deck a is overhead with headroom. */
+    if (b > -70 && y <= b + 120 && a > y + 140) {
+        return b;
     }
     return a;
 }
@@ -73,7 +81,7 @@ bool World_isBridgeAt(World* w, int xm, int zm) {
     if (!t || !t->top || !t->low || !t->surf) return false;
     int k = (gj % TILE_NH) * TILE_NH + (gi % TILE_NH);
     int top = t->top[k], low = t->low[k];
-    return t->surf[k] == WORLD_S_ROAD && top > -70 && low < -70;
+    return (t->surf[k] == WORLD_S_ROAD || t->surf[k] == WORLD_S_PAVE) && (top > low + 80);
 }
 
 /* A bridge deck over water can be several metres above the approach; do not
@@ -147,7 +155,16 @@ bool World_solidCell(World* w, int gi, int gj) {
     Tile* t = World_tileFor(w, gi, gj, TILE_NS);
     if (!t || !t->solid) return false;
     int li = gi % TILE_NS, lj = gj % TILE_NS;
-    return (t->solid[lj * TILE_SROW + (li >> 3)] & (0x80 >> (li & 7))) != 0;
+    if ((t->solid[lj * TILE_SROW + (li >> 3)] & (0x80 >> (li & 7))) == 0) return false;
+
+    /* A roadway is for driving: ignore geometry artifacts (bridge trusses,
+       cables, pillars from below) that fell into the road surface. */
+    int hi = gi / 2, hj = gj / 2;
+    Tile* th = World_tileFor(w, hi, hj, TILE_NH);
+    if (th && th->surf && th->surf[(hj % TILE_NH) * TILE_NH + (hi % TILE_NH)] == WORLD_S_ROAD) {
+        return false;
+    }
+    return true;
 }
 
 int World_scell(int m, int o) {

@@ -151,8 +151,10 @@ void World_moveCar(World* w, Car* c, int dt) {
             c->z = w->rz - oz2;
         }
         int g = World_groundH(w, c->x + ox2, c->z + oz2, gHere);
-        bool frontOk = World_stepAllowed(w, c->x + ox2, c->z + oz2, gHere, 130);
-        bool aheadOk = World_stepAllowed(w, c->x + ox2 * 12 / 10, c->z + oz2 * 12 / 10, gHere, 130);
+        bool frontOk = (World_surfAt(w, c->x + ox2, c->z + oz2) == WORLD_S_ROAD) ||
+                       World_stepAllowed(w, c->x + ox2, c->z + oz2, gHere, 130);
+        bool aheadOk = (World_surfAt(w, c->x + ox2 * 12 / 10, c->z + oz2 * 12 / 10) == WORLD_S_ROAD) ||
+                       World_stepAllowed(w, c->x + ox2 * 12 / 10, c->z + oz2 * 12 / 10, gHere, 130);
         if (g > -60 && !frontOk && !aheadOk) {
             w->dbgHit = 20 + k + g * 100;
             hit = true;
